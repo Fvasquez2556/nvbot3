@@ -1,460 +1,259 @@
 #!/usr/bin/env python3
 """
 NvBot3 - Historical Data Downloader
-===================================
+==================================
 
-Módulo para descargar datos históricos de Binance para entrenamiento de modelos.
-Implementa descarga por chunks, rate limiting, progress tracking y manejo robusto de errores.
+Descarga datos históricos de Binance para entrenamiento de modelos.
+Basado en las instrucciones del Training Pipeline NvBot3.
 
-Autor: NvBot3 Team
-Fecha: Agosto 2025
+Características:
+- Descarga 2+ años de datos históricos
+- Múltiples símbolos y timeframes
+- Rate limiting respetado
+- Progress tracking
+- Resume capability
+- Data validation
 """
 
 import ccxt
 import pandas as pd
-import numpy as np
 import time
 import os
 import sys
-import logging
-import yaml
 from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional
 from tqdm import tqdm
-from pathlib import Path
-import asyncio
+import argparse
+import logging
+from typing import List, Dict, Optional
 from dotenv import load_dotenv
 
+# Configurar logging
+def setup_logging():
+    """Configurar sistema de logging."""
+    logs_dir = 'logs'
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler('logs/data_download.log', encoding='utf-8'),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+
+setup_logging()
+logger = logging.getLogger(__name__)
+
+# Cargar variables de entorno al inicio del programa
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+env_path = os.path.join(project_root, '.env')
+load_dotenv(dotenv_path=env_path)
+
+logger.info(f"Cargando archivo .env desde: {env_path}")
+logger.info(f"Variables de entorno cargadas correctamente")
 
 class HistoricalDataDownloader:
     """
-    Clase para descargar datos históricos de Binance con manejo robusto de errores
-    y optimización para recursos limitados de laptop.
+    Descargador de datos históricos de Binance optimizado para entrenamiento ML.
+    
+    Especificaciones según instrucciones:
+    - Símbolos: BTCUSDT, ETHUSDT, BNBUSDT, ADAUSDT, SOLUSDT
+    - Timeframes: 5m, 15m, 1h, 4h, 1d
+    - Período: Desde enero 2022 hasta presente
+    - Rate limiting: Máximo 1200 requests/minuto
     """
     
-    def __init__(self, config_path: str = "config/training_config.yaml"):
-        """
-        Inicializar el descargador de datos históricos.
+    def __init__(self):
+        """Inicializar conexión Binance y configuración."""
+        # Las variables de entorno ya están cargadas al inicio del programa
+        api_key = os.getenv('BINANCE_API_KEY')
+        secret_key = os.getenv('BINANCE_SECRET_KEY')
         
-        Args:
-            config_path: Ruta al archivo de configuración YAML
-        """
-        # Verificar entorno virtual
-        self._verify_virtual_environment()
+        if api_key and secret_key:
+            logger.info(f"SUCCESS: API Key cargada: {api_key[:8]}...")
+            logger.info(f"SUCCESS: Secret Key cargada: {secret_key[:8]}...")
+        else:
+            logger.error("ERROR: No se pudieron cargar las claves API del archivo .env")
+            logger.error("ERROR: Claves API de Binance no configuradas!")
+            logger.error("Configura BINANCE_API_KEY y BINANCE_SECRET_KEY en el archivo .env")
         
-        # Cargar configuración
-        self.config = self._load_config(config_path)
+        # Configuración según instrucciones
+        self.symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT']
+        self.timeframes = ['5m', '15m', '1h', '4h', '1d']
+        self.start_date = datetime(2022, 1, 1)
+        self.end_date = datetime.now()
         
-        # Setup logging
-        self._setup_logging()
-        
-        # Cargar variables de entorno
-        load_dotenv()
+        # Setup de directorios con paths absolutos
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.raw_data_dir = os.path.join(project_root, 'data', 'raw')
+        self.logs_dir = os.path.join(project_root, 'logs')
+        os.makedirs(self.raw_data_dir, exist_ok=True)
+        os.makedirs(self.logs_dir, exist_ok=True)
         
         # Inicializar conexión Binance
-        self.exchange = self._initialize_binance_connection()
-        
-        # Configurar rate limiting
-        self.rate_limiter = RateLimiter(
-            max_requests=self.config['api']['binance']['rate_limit_per_minute'],
-            time_window=60  # 1 minuto
-        )
-        
-        # Setup directorios
-        self._ensure_directories()
-        
-        # Configurar parámetros de descarga
-        self.chunk_size_days = self.config['api']['binance']['chunk_size_days']
-        self.max_retries = self.config['api']['binance']['max_retries']
-        self.retry_delay = self.config['api']['binance']['retry_delay']
-        self.backoff_factor = self.config['api']['binance']['backoff_factor']
-        
-        self.logger.info("HistoricalDataDownloader inicializado correctamente")
-    
-    def _verify_virtual_environment(self):
-        """Verificar que el entorno virtual nvbot3_env está activo."""
-        if 'nvbot3_env' not in sys.executable:
-            print("❌ ERROR: Entorno virtual nvbot3_env no está activo!")
-            print("Por favor ejecuta: nvbot3_env\\Scripts\\activate")
-            sys.exit(1)
-        print("✅ Entorno virtual nvbot3_env activo")
-    
-    def _load_config(self, config_path: str) -> Dict:
-        """Cargar configuración desde archivo YAML."""
-        try:
-            with open(config_path, 'r', encoding='utf-8') as file:
-                config = yaml.safe_load(file)
-            return config
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Archivo de configuración no encontrado: {config_path}")
-        except yaml.YAMLError as e:
-            raise ValueError(f"Error al parsear configuración YAML: {e}")
-    
-    def _setup_logging(self):
-        """Configurar sistema de logging."""
-        log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
-        
-        logging.basicConfig(
-            level=getattr(logging, log_level),
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler('data/download_log.txt'),
-                logging.StreamHandler(sys.stdout)
-            ]
-        )
-        self.logger = logging.getLogger(__name__)
-    
-    def _initialize_binance_connection(self) -> ccxt.binance:
-        """Inicializar conexión con Binance."""
-        try:
-            exchange = ccxt.binance({
-                'apiKey': os.getenv('BINANCE_API_KEY', ''),
-                'secret': os.getenv('BINANCE_SECRET_KEY', ''),
-                'sandbox': False,  # Usar producción para datos históricos
-                'rateLimit': 50,   # Rate limit conservativo
+        if api_key and secret_key:
+            self.exchange = ccxt.binance({
+                'apiKey': api_key,
+                'secret': secret_key,
+                'timeout': 30000,
+                'rateLimit': 50,  # 50ms entre requests para respetar límites
                 'enableRateLimit': True,
-                'options': {
-                    'defaultType': 'spot'  # Spot trading
-                }
             })
-            
-            # Verificar conectividad
-            exchange.load_markets()
-            self.logger.info("Conexión con Binance establecida correctamente")
-            return exchange
-            
-        except Exception as e:
-            self.logger.error(f"Error conectando con Binance: {e}")
-            # Para datos históricos, podemos continuar sin API keys
-            exchange = ccxt.binance({
-                'sandbox': False,
-                'rateLimit': 100,
-                'enableRateLimit': True
-            })
-            exchange.load_markets()
-            return exchange
-    
-    def _ensure_directories(self):
-        """Crear directorios necesarios si no existen."""
-        directories = [
-            'data/raw',
-            'data/processed', 
-            'data/models',
-            'logs'
+        else:
+            self.exchange = None
+        
+        # Columnas de datos según especificaciones
+        self.columns = [
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'number_of_trades',
+            'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume'
         ]
         
-        for directory in directories:
-            Path(directory).mkdir(parents=True, exist_ok=True)
-        
-        self.logger.info("Directorios verificados/creados")
-    
-    def download_symbol_timeframe(self, symbol: str, timeframe: str, 
-                                start_date: str, end_date: Optional[str] = None) -> bool:
-        """
-        Descargar datos históricos para un símbolo y timeframe específico.
-        
-        Args:
-            symbol: Símbolo de trading (ej: 'BTCUSDT')
-            timeframe: Timeframe (ej: '5m', '1h', '1d')
-            start_date: Fecha de inicio (formato: 'YYYY-MM-DD')
-            end_date: Fecha de fin (opcional, default: hoy)
-            
-        Returns:
-            bool: True si la descarga fue exitosa
-        """
-        try:
-            # Verificar si el símbolo existe en Binance
-            if symbol not in self.exchange.markets:
-                self.logger.error(f"Símbolo {symbol} no encontrado en Binance")
-                return False
-            
-            # Configurar fechas
-            start_ts = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp() * 1000)
-            end_ts = int(datetime.now().timestamp() * 1000) if end_date is None else \
-                     int(datetime.strptime(end_date, '%Y-%m-%d').timestamp() * 1000)
-            
-            # Verificar si ya existe archivo y obtener última fecha
-            file_path = f"data/raw/{symbol}_{timeframe}.csv"
-            start_ts = self._get_resume_timestamp(file_path, start_ts)
-            
-            if start_ts >= end_ts:
-                self.logger.info(f"{symbol} {timeframe}: Ya está actualizado")
-                return True
-            
-            # Calcular chunks para descarga
-            chunks = self._calculate_chunks(start_ts, end_ts, timeframe)
-            
-            self.logger.info(f"Descargando {symbol} {timeframe}: {len(chunks)} chunks")
-            
-            all_data = []
-            
-            # Progress bar para chunks
-            chunk_pbar = tqdm(chunks, desc=f"{symbol} {timeframe}", 
-                            unit="chunk", leave=True)
-            
-            for chunk_start, chunk_end in chunk_pbar:
-                chunk_data = self._download_chunk_with_retry(
-                    symbol, timeframe, chunk_start, chunk_end
-                )
-                
-                if chunk_data is not None and len(chunk_data) > 0:
-                    all_data.extend(chunk_data)
-                    
-                    # Actualizar progress bar con info útil
-                    chunk_pbar.set_postfix({
-                        'records': len(chunk_data),
-                        'total': len(all_data)
-                    })
-                
-                # Rate limiting
-                self.rate_limiter.wait_if_needed()
-            
-            chunk_pbar.close()
-            
-            if len(all_data) == 0:
-                self.logger.warning(f"No se obtuvieron datos para {symbol} {timeframe}")
-                return False
-            
-            # Convertir a DataFrame y guardar
-            success = self._save_data_to_csv(all_data, file_path, symbol, timeframe)
-            
-            if success:
-                self.logger.info(f"✅ {symbol} {timeframe}: {len(all_data)} registros guardados")
-            
-            return success
-            
-        except Exception as e:
-            self.logger.error(f"Error descargando {symbol} {timeframe}: {e}")
+        logger.info("HistoricalDataDownloader inicializado correctamente")
+        logger.info(f"Símbolos a descargar: {self.symbols}")
+        logger.info(f"Timeframes: {self.timeframes}")
+        logger.info(f"Período: {self.start_date.date()} a {self.end_date.date()}")
+
+    def get_file_path(self, symbol: str, timeframe: str) -> str:
+        """Generar ruta de archivo para símbolo y timeframe."""
+        return os.path.join(self.raw_data_dir, f"{symbol}_{timeframe}.csv")
+
+    def file_exists_and_valid(self, symbol: str, timeframe: str) -> bool:
+        """Verificar si archivo existe y tiene datos válidos."""
+        file_path = self.get_file_path(symbol, timeframe)
+        if not os.path.exists(file_path):
             return False
-    
-    def _get_resume_timestamp(self, file_path: str, default_start: int) -> int:
-        """
-        Obtener timestamp para reanudar descarga desde archivo existente.
         
-        Args:
-            file_path: Ruta del archivo CSV
-            default_start: Timestamp de inicio por defecto
-            
-        Returns:
-            int: Timestamp desde donde continuar descarga
-        """
         try:
-            if os.path.exists(file_path):
-                df = pd.read_csv(file_path)
-                if len(df) > 0:
-                    last_timestamp = df['timestamp'].max()
-                    self.logger.info(f"Resumiendo desde: {datetime.fromtimestamp(last_timestamp/1000)}")
-                    return int(last_timestamp)
+            df = pd.read_csv(file_path)
+            if len(df) < 100:  # Mínimo 100 registros para considerar válido
+                return False
             
-            return default_start
-            
-        except Exception as e:
-            self.logger.warning(f"Error leyendo archivo existente {file_path}: {e}")
-            return default_start
-    
-    def _calculate_chunks(self, start_ts: int, end_ts: int, timeframe: str) -> List[Tuple[int, int]]:
-        """
-        Calcular chunks para descarga eficiente.
-        
-        Args:
-            start_ts: Timestamp de inicio
-            end_ts: Timestamp de fin
-            timeframe: Timeframe para calcular chunk size apropiado
-            
-        Returns:
-            List[Tuple[int, int]]: Lista de (start, end) timestamps para cada chunk
-        """
-        chunks = []
-        
-        # Calcular tamaño de chunk en base al timeframe
-        chunk_ms = self.chunk_size_days * 24 * 60 * 60 * 1000  # días a millisegundos
-        
-        # Ajustar chunk size basado en timeframe para evitar límites de API
-        timeframe_limits = {
-            '1m': 7,    # 7 días máximo
-            '5m': 15,   # 15 días máximo 
-            '15m': 30,  # 30 días máximo
-            '1h': 60,   # 60 días máximo
-            '4h': 120,  # 120 días máximo
-            '1d': 365   # 1 año máximo
-        }
-        
-        if timeframe in timeframe_limits:
-            max_days = timeframe_limits[timeframe]
-            chunk_ms = min(chunk_ms, max_days * 24 * 60 * 60 * 1000)
-        
-        current_ts = start_ts
-        while current_ts < end_ts:
-            chunk_end = min(current_ts + chunk_ms, end_ts)
-            chunks.append((current_ts, chunk_end))
-            current_ts = chunk_end
-        
-        return chunks
-    
-    def _download_chunk_with_retry(self, symbol: str, timeframe: str, 
-                                 start_ts: int, end_ts: int) -> Optional[List]:
-        """
-        Descargar chunk con reintentos automáticos.
-        
-        Args:
-            symbol: Símbolo de trading
-            timeframe: Timeframe 
-            start_ts: Timestamp de inicio del chunk
-            end_ts: Timestamp de fin del chunk
-            
-        Returns:
-            Optional[List]: Datos del chunk o None si falla
-        """
-        for attempt in range(self.max_retries):
-            try:
-                # Fetch OHLCV data desde Binance
-                ohlcv = self.exchange.fetch_ohlcv(
-                    symbol, 
-                    timeframe, 
-                    since=start_ts,
-                    limit=1000  # Límite de Binance
-                )
+            # Verificar que tiene datos recientes (últimos 30 días)
+            latest_timestamp = pd.to_datetime(df['timestamp'].iloc[-1])
+            if (datetime.now() - latest_timestamp).days > 30:
+                return False
                 
-                # Filtrar datos que están en el rango correcto
-                filtered_data = [
-                    candle for candle in ohlcv 
-                    if start_ts <= candle[0] <= end_ts
-                ]
-                
-                return filtered_data
-                
-            except Exception as e:
-                wait_time = self.retry_delay * (self.backoff_factor ** attempt)
-                
-                if attempt < self.max_retries - 1:
-                    self.logger.warning(
-                        f"Intento {attempt + 1} falló para {symbol} {timeframe}: {e}. "
-                        f"Reintentando en {wait_time}s..."
-                    )
-                    time.sleep(wait_time)
-                else:
-                    self.logger.error(
-                        f"Falló descarga después de {self.max_retries} intentos: {e}"
-                    )
-        
-        return None
-    
-    def _save_data_to_csv(self, data: List, file_path: str, 
-                         symbol: str, timeframe: str) -> bool:
-        """
-        Guardar datos en formato CSV con validación.
-        
-        Args:
-            data: Lista de datos OHLCV
-            file_path: Ruta donde guardar el archivo
-            symbol: Símbolo para logging
-            timeframe: Timeframe para logging
-            
-        Returns:
-            bool: True si se guardó correctamente
-        """
-        try:
-            # Definir columnas según especificación
-            columns = [
-                'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                'close_time', 'quote_asset_volume', 'number_of_trades',
-                'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume'
-            ]
-            
-            # Convertir a DataFrame
-            df = pd.DataFrame(data, columns=columns[:len(data[0])])
-            
-            # Completar columnas faltantes con NaN si es necesario
-            for col in columns:
-                if col not in df.columns:
-                    df[col] = np.nan
-            
-            # Validación de datos
-            validation_result = self._validate_data(df, symbol, timeframe)
-            
-            if not validation_result['valid']:
-                self.logger.warning(f"Datos con problemas para {symbol} {timeframe}: {validation_result['issues']}")
-            
-            # Eliminar duplicados y ordenar por timestamp
-            df = df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
-            
-            # Combinar con datos existentes si el archivo ya existe
-            if os.path.exists(file_path):
-                existing_df = pd.read_csv(file_path)
-                df = pd.concat([existing_df, df]).drop_duplicates(subset=['timestamp']).sort_values('timestamp')
-            
-            # Guardar archivo
-            df.to_csv(file_path, index=False)
-            
-            self.logger.info(f"Datos guardados: {file_path} ({len(df)} registros)")
+            logger.info(f"Archivo existente válido: {file_path} ({len(df)} registros)")
             return True
             
         except Exception as e:
-            self.logger.error(f"Error guardando datos en {file_path}: {e}")
+            logger.warning(f"Error al validar archivo {file_path}: {e}")
             return False
-    
-    def _validate_data(self, df: pd.DataFrame, symbol: str, timeframe: str) -> Dict:
+
+    def download_symbol_timeframe(self, symbol: str, timeframe: str, 
+                                start_date: datetime, end_date: datetime,
+                                resume: bool = True) -> bool:
         """
-        Validar calidad de datos descargados.
+        Descargar datos para un símbolo y timeframe específico.
         
         Args:
-            df: DataFrame con datos
-            symbol: Símbolo para contexto
-            timeframe: Timeframe para contexto
+            symbol: Par de trading (ej. BTCUSDT)
+            timeframe: Timeframe (ej. 5m, 1h, 1d)
+            start_date: Fecha inicio
+            end_date: Fecha fin
+            resume: Si continuar descarga existente
             
         Returns:
-            Dict: Resultado de validación con detalles
+            bool: True si descarga exitosa
         """
-        issues = []
+        file_path = self.get_file_path(symbol, timeframe)
         
-        # Verificar que no esté vacío
-        if len(df) == 0:
-            issues.append("DataFrame vacío")
-            return {'valid': False, 'issues': issues}
+        # Verificar si ya existe y es válido
+        if resume and self.file_exists_and_valid(symbol, timeframe):
+            logger.info(f"Saltando {symbol} {timeframe} - archivo válido existente")
+            return True
         
-        # Verificar duplicados
-        duplicates = df.duplicated(subset=['timestamp']).sum()
-        if duplicates > 0:
-            issues.append(f"{duplicates} timestamps duplicados")
+        logger.info(f"Descargando {symbol} {timeframe}...")
         
-        # Verificar gaps en timestamp
-        df_sorted = df.sort_values('timestamp')
-        time_diffs = df_sorted['timestamp'].diff()
-        
-        # Calcular timeframe en millisegundos
-        timeframe_ms = self._timeframe_to_ms(timeframe)
-        max_gap = timeframe_ms * self.config['download']['max_gap_multiplier']
-        
-        large_gaps = (time_diffs > max_gap).sum()
-        if large_gaps > 0:
-            issues.append(f"{large_gaps} gaps grandes en timestamps")
-        
-        # Verificar valores de precio válidos
-        price_cols = ['open', 'high', 'low', 'close']
-        for col in price_cols:
-            if col in df.columns:
-                invalid_prices = (df[col] <= 0).sum()
-                if invalid_prices > 0:
-                    issues.append(f"{invalid_prices} precios inválidos en {col}")
-        
-        # Verificar volumen
-        if 'volume' in df.columns:
-            zero_volume = (df['volume'] <= 0).sum()
-            volume_ratio = zero_volume / len(df)
-            if volume_ratio > 0.05:  # Más del 5% con volumen cero
-                issues.append(f"{volume_ratio:.1%} de registros con volumen cero")
-        
-        return {
-            'valid': len(issues) == 0,
-            'issues': issues,
-            'total_records': len(df),
-            'duplicates': duplicates,
-            'large_gaps': large_gaps
-        }
-    
-    def _timeframe_to_ms(self, timeframe: str) -> int:
-        """Convertir timeframe string a millisegundos."""
-        timeframe_map = {
+        try:
+            # Verificar que exchange está configurado
+            if not self.exchange:
+                logger.error("Exchange no configurado - claves API no válidas")
+                return False
+            
+            # Configurar chunks para evitar saturar RAM
+            chunk_size_days = 30  # 30 días por chunk
+            current_date = start_date
+            all_data = []
+            
+            with tqdm(desc=f"{symbol} {timeframe}", unit="días") as pbar:
+                while current_date < end_date:
+                    chunk_end = min(current_date + timedelta(days=chunk_size_days), end_date)
+                    
+                    # Convertir a timestamps en milisegundos
+                    since = int(current_date.timestamp() * 1000)
+                    until = int(chunk_end.timestamp() * 1000)
+                    
+                    # Descargar chunk
+                    chunk_data = self.exchange.fetch_ohlcv(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        since=since,
+                        limit=1000
+                    )
+                    
+                    if chunk_data:
+                        # Filtrar datos dentro del rango temporal
+                        filtered_data = [
+                            candle for candle in chunk_data 
+                            if since <= candle[0] <= until
+                        ]
+                        all_data.extend(filtered_data)
+                        
+                        logger.debug(f"Chunk {current_date.date()}: {len(filtered_data)} velas")
+                    
+                    # Rate limiting
+                    time.sleep(0.1)  # 100ms entre requests
+                    
+                    # Actualizar progreso
+                    days_processed = (chunk_end - start_date).days
+                    total_days = (end_date - start_date).days
+                    pbar.update(chunk_size_days)
+                    pbar.set_postfix({
+                        'registros': len(all_data),
+                        'progreso': f"{days_processed}/{total_days} días"
+                    })
+                    
+                    current_date = chunk_end
+            
+            # Convertir a DataFrame
+            if not all_data:
+                logger.error(f"No se obtuvieron datos para {symbol} {timeframe}")
+                return False
+            
+            df = pd.DataFrame(all_data, columns=self.columns[:6])  # OHLCV básico
+            
+            # Agregar columnas adicionales según especificaciones
+            df['close_time'] = df['timestamp'] + self.get_timeframe_ms(timeframe) - 1
+            df['quote_asset_volume'] = df['volume'] * df['close']  # Aproximación
+            df['number_of_trades'] = 0  # No disponible en API pública
+            df['taker_buy_base_asset_volume'] = df['volume'] * 0.5  # Aproximación
+            df['taker_buy_quote_asset_volume'] = df['quote_asset_volume'] * 0.5
+            
+            # Convertir timestamp a datetime legible
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
+            
+            # Validar datos antes de guardar
+            if not self.validate_downloaded_data(df, symbol, timeframe):
+                logger.error(f"Validación falló para {symbol} {timeframe}")
+                return False
+            
+            # Guardar archivo
+            df.to_csv(file_path, index=False)
+            logger.info(f"SUCCESS: Guardado: {file_path} ({len(df)} registros)")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error descargando {symbol} {timeframe}: {e}")
+            return False
+
+    def get_timeframe_ms(self, timeframe: str) -> int:
+        """Convertir timeframe a milisegundos."""
+        timeframe_ms = {
             '1m': 60 * 1000,
             '5m': 5 * 60 * 1000,
             '15m': 15 * 60 * 1000,
@@ -462,137 +261,215 @@ class HistoricalDataDownloader:
             '4h': 4 * 60 * 60 * 1000,
             '1d': 24 * 60 * 60 * 1000
         }
-        return timeframe_map.get(timeframe, 60 * 1000)
-    
-    def download_all_data(self) -> Dict:
+        return timeframe_ms.get(timeframe, 60 * 1000)
+
+    def validate_downloaded_data(self, df: pd.DataFrame, symbol: str, timeframe: str) -> bool:
+        """Validar calidad de datos descargados."""
+        try:
+            # Verificar que no hay gaps mayores a timeframe * 2
+            df_sorted = df.sort_values('timestamp')
+            time_diffs = df_sorted['timestamp'].diff().dt.total_seconds()
+            expected_interval = self.get_timeframe_ms(timeframe) / 1000
+            
+            large_gaps = time_diffs > (expected_interval * 2)
+            if large_gaps.sum() > len(df) * 0.01:  # Máximo 1% de gaps grandes
+                logger.warning(f"Demasiados gaps en {symbol} {timeframe}: {large_gaps.sum()}")
+                return False
+            
+            # Verificar que no hay cambios de precio extremos (>50%)
+            price_changes = df['close'].pct_change().abs()
+            extreme_changes = price_changes > 0.5
+            if extreme_changes.sum() > 0:
+                logger.warning(f"Cambios de precio extremos en {symbol} {timeframe}: {extreme_changes.sum()}")
+                return False
+            
+            # Verificar que volumen > 0 en 95%+ registros
+            zero_volume_pct = (df['volume'] == 0).sum() / len(df)
+            if zero_volume_pct > 0.05:
+                logger.warning(f"Demasiados registros con volumen cero en {symbol} {timeframe}: {zero_volume_pct:.2%}")
+                return False
+            
+            logger.info(f"SUCCESS: Validacion exitosa: {symbol} {timeframe}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error en validación de {symbol} {timeframe}: {e}")
+            return False
+
+    def download_all_data(self, resume: bool = True) -> Dict[str, Dict[str, bool]]:
         """
         Descargar todos los datos según configuración.
         
-        Returns:
-            Dict: Resumen de resultados de descarga
-        """
-        symbols = self.config['data']['symbols']
-        timeframes = self.config['data']['timeframes'] 
-        start_date = self.config['data']['start_date']
-        
-        total_combinations = len(symbols) * len(timeframes)
-        successful_downloads = 0
-        failed_downloads = []
-        
-        self.logger.info(f"Iniciando descarga de {total_combinations} combinaciones símbolo-timeframe")
-        
-        # Progress bar principal
-        main_pbar = tqdm(total=total_combinations, desc="Descarga General", 
-                        unit="combo", position=0)
-        
-        try:
-            for symbol in symbols:
-                for timeframe in timeframes:
-                    main_pbar.set_description(f"Descargando {symbol} {timeframe}")
-                    
-                    success = self.download_symbol_timeframe(symbol, timeframe, start_date)
-                    
-                    if success:
-                        successful_downloads += 1
-                    else:
-                        failed_downloads.append(f"{symbol}_{timeframe}")
-                    
-                    main_pbar.update(1)
-                    main_pbar.set_postfix({
-                        'exitosos': successful_downloads,
-                        'fallidos': len(failed_downloads)
-                    })
-                    
-                    # Pequeña pausa entre descargas para ser gentil con la API
-                    time.sleep(0.5)
-            
-        finally:
-            main_pbar.close()
-        
-        # Resumen final
-        result = {
-            'total_combinations': total_combinations,
-            'successful_downloads': successful_downloads,
-            'failed_downloads': failed_downloads,
-            'success_rate': successful_downloads / total_combinations if total_combinations > 0 else 0
-        }
-        
-        self.logger.info(f"Descarga completada: {successful_downloads}/{total_combinations} exitosos")
-        if failed_downloads:
-            self.logger.warning(f"Descargas fallidas: {failed_downloads}")
-        
-        return result
-
-
-class RateLimiter:
-    """Clase para manejar rate limiting de API."""
-    
-    def __init__(self, max_requests: int, time_window: int):
-        """
-        Inicializar rate limiter.
-        
         Args:
-            max_requests: Máximo número de requests permitidos
-            time_window: Ventana de tiempo en segundos
-        """
-        self.max_requests = max_requests
-        self.time_window = time_window
-        self.requests = []
-    
-    def wait_if_needed(self):
-        """Esperar si se ha alcanzado el límite de rate."""
-        now = time.time()
-        
-        # Limpiar requests antiguos
-        self.requests = [req_time for req_time in self.requests 
-                        if now - req_time < self.time_window]
-        
-        # Verificar si necesitamos esperar
-        if len(self.requests) >= self.max_requests:
-            oldest_request = min(self.requests)
-            wait_time = self.time_window - (now - oldest_request) + 0.1  # +0.1 por seguridad
+            resume: Si continuar descargas existentes
             
-            if wait_time > 0:
-                time.sleep(wait_time)
+        Returns:
+            Dict con resultados de descarga por símbolo/timeframe
+        """
+        results = {}
+        total_combinations = len(self.symbols) * len(self.timeframes)
+        completed = 0
         
-        # Registrar nueva request
-        self.requests.append(now)
+        logger.info(f"Iniciando descarga de {total_combinations} combinaciones...")
+        
+        for symbol in self.symbols:
+            results[symbol] = {}
+            
+            for timeframe in self.timeframes:
+                logger.info(f"Progreso: {completed + 1}/{total_combinations}")
+                
+                success = self.download_symbol_timeframe(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    start_date=self.start_date,
+                    end_date=self.end_date,
+                    resume=resume
+                )
+                
+                results[symbol][timeframe] = success
+                completed += 1
+                
+                # Pausa entre símbolos para rate limiting
+                if success:
+                    time.sleep(1)
+                else:
+                    logger.error(f"ERROR: Fallo descarga: {symbol} {timeframe}")
+                    time.sleep(5)  # Pausa más larga en errores
+        
+        # Reporte final
+        self.generate_download_report(results)
+        return results
 
+    def generate_download_report(self, results: Dict[str, Dict[str, bool]]) -> None:
+        """Generar reporte de descarga."""
+        total = 0
+        successful = 0
+        failed_combinations = []
+        
+        for symbol, timeframe_results in results.items():
+            for timeframe, success in timeframe_results.items():
+                total += 1
+                if success:
+                    successful += 1
+                else:
+                    failed_combinations.append(f"{symbol} {timeframe}")
+        
+        success_rate = (successful / total) * 100 if total > 0 else 0
+        
+        logger.info("="*50)
+        logger.info("REPORTE DE DESCARGA")
+        logger.info("="*50)
+        logger.info(f"Total combinaciones: {total}")
+        logger.info(f"Exitosas: {successful}")
+        logger.info(f"Fallidas: {total - successful}")
+        logger.info(f"Tasa de éxito: {success_rate:.1f}%")
+        
+        if failed_combinations:
+            logger.warning("Combinaciones fallidas:")
+            for combo in failed_combinations:
+                logger.warning(f"  - {combo}")
+        
+        logger.info("="*50)
 
 def main():
-    """Función principal para ejecutar el descargador."""
-    print("🤖 NvBot3 - Historical Data Downloader")
-    print("=" * 50)
+    """Función principal."""
+    parser = argparse.ArgumentParser(description='Descargar datos históricos de Binance')
+    parser.add_argument('--symbol', help='Símbolo específico a descargar (ej. BTCUSDT)')
+    parser.add_argument('--timeframe', help='Timeframe específico (ej. 5m, 1h)')
+    parser.add_argument('--download-all', action='store_true', help='Descargar todos los símbolos y timeframes')
+    parser.add_argument('--no-resume', action='store_true', help='No continuar descargas existentes')
+    parser.add_argument('--validate-only', action='store_true', help='Solo validar archivos existentes')
+    
+    args = parser.parse_args()
+    
+    # Verificar entorno virtual
+    if 'nvbot3_env' not in sys.executable:
+        logger.error("ERROR: Entorno virtual no esta activo!")
+        logger.error("Ejecuta: nvbot3_env\\Scripts\\activate")
+        sys.exit(1)
+    
+    # Verificar variables de entorno
+    if not os.getenv('BINANCE_API_KEY') or not os.getenv('BINANCE_SECRET_KEY'):
+        logger.error("ERROR: Claves API de Binance no configuradas!")
+        logger.error("Configura BINANCE_API_KEY y BINANCE_SECRET_KEY en el archivo .env")
+        sys.exit(1)
     
     try:
-        # Verificar entorno virtual antes de comenzar
-        if 'nvbot3_env' not in sys.executable:
-            print("❌ ERROR: Entorno virtual nvbot3_env no está activo!")
-            print("Por favor ejecuta: nvbot3_env\\Scripts\\activate")
-            return False
-        
-        # Inicializar descargador
         downloader = HistoricalDataDownloader()
         
-        # Ejecutar descarga completa
-        results = downloader.download_all_data()
+        if args.validate_only:
+            # Solo validar archivos existentes
+            for symbol in downloader.symbols:
+                for timeframe in downloader.timeframes:
+                    file_path = downloader.get_file_path(symbol, timeframe)
+                    if os.path.exists(file_path):
+                        df = pd.read_csv(file_path)
+                        is_valid = downloader.validate_downloaded_data(df, symbol, timeframe)
+                        status = "SUCCESS" if is_valid else "ERROR"
+                        logger.info(f"{status} {symbol} {timeframe}: {len(df)} registros")
+            return
         
-        # Mostrar resumen
-        print("\n📊 Resumen de Descarga:")
-        print(f"✅ Exitosos: {results['successful_downloads']}")
-        print(f"❌ Fallidos: {len(results['failed_downloads'])}")
-        print(f"📈 Tasa de éxito: {results['success_rate']:.1%}")
-        
-        if results['failed_downloads']:
-            print(f"\n⚠️  Descargas fallidas: {', '.join(results['failed_downloads'])}")
-        
-        return results['success_rate'] > 0.8  # Considerar exitoso si >80% funciona
-        
+        if args.symbol and args.timeframe:
+            # Descargar símbolo y timeframe específico
+            success = downloader.download_symbol_timeframe(
+                symbol=args.symbol.upper(),
+                timeframe=args.timeframe.lower(),
+                start_date=downloader.start_date,
+                end_date=downloader.end_date,
+                resume=not args.no_resume
+            )
+            
+            if success:
+                logger.info("SUCCESS: Descarga completada exitosamente")
+            else:
+                logger.error("ERROR: Descarga fallo")
+                sys.exit(1)
+        elif args.download_all:
+            # Descargar todos los símbolos y timeframes
+            logger.info("Iniciando descarga completa de todos los símbolos y timeframes...")
+            results = downloader.download_all_data(resume=not args.no_resume)
+            
+            # Reporte final
+            successful = 0
+            total = 0
+            for symbol_results in results.values():
+                for success in symbol_results.values():
+                    total += 1
+                    if success:
+                        successful += 1
+            
+            logger.info(f"Descarga completa finalizada: {successful}/{total} exitosas")
+            
+            if successful < total:
+                logger.warning("Algunas descargas fallaron. Revisar logs para detalles.")
+                sys.exit(1)
+        else:
+            # Si no se especifica símbolo/timeframe específico ni --download-all, mostrar ayuda
+            logger.error("ERROR: Debes especificar:")
+            logger.error("  - Símbolo y timeframe específico: --symbol BTCUSDT --timeframe 5m")
+            logger.error("  - Descargar todo: --download-all")
+            logger.error("  - Solo validar: --validate-only")
+            parser.print_help()
+            sys.exit(1)
+            
+            # Verificar si todas las descargas fueron exitosas
+            all_successful = all(
+                all(timeframe_results.values()) 
+                for timeframe_results in results.values()
+            )
+            
+            if all_successful:
+                logger.info("SUCCESS: Todas las descargas completadas exitosamente!")
+            else:
+                logger.warning("WARNING: Algunas descargas fallaron. Revisa el reporte arriba.")
+                sys.exit(1)
+                
+    except KeyboardInterrupt:
+        logger.info("Descarga interrumpida por el usuario")
+        sys.exit(1)
     except Exception as e:
-        print(f"❌ Error crítico: {e}")
-        return False
-
+        logger.error(f"Error inesperado: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)
+    main()

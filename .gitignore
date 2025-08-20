@@ -120,11 +120,27 @@ models/*.pb
 models/*.onnx
 models/large_models/
 
-# Datasets grandes
+# Datasets grandes y datos históricos descargados
+data/raw/
+data/processed/
+data/backups/
+data/exports/
 data/raw/large_datasets/
 data/processed/full_datasets/
 *.parquet
 *.hdf5
+*.csv
+*.feather
+
+# Archivos de datos específicos de criptomonedas
+*_5m.csv
+*_15m.csv
+*_1h.csv
+*_4h.csv
+*_1d.csv
+*USDT*.csv
+*BTC*.csv
+*ETH*.csv
 
 # ========================
 # CONFIGURACIÓN DE IDEs
