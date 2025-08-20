@@ -1,0 +1,560 @@
+NvBot3 - Contexto Completo para Desarrollo
+
+# 🤖 NvBot3 - Contexto Completo para Desarrollo
+
+## 📋 Resumen Ejecutivo
+
+**NvBot3** es un bot de trading avanzado para criptomonedas que utiliza Inteligencia Artificial para detectar oportunidades de trading específicas. Este documento proporciona el contexto completo para su desarrollo usando GitHub Copilot como asistente de codificación.
+
+### Funcionalidades Principales
+1. **Detección de Momentum Alcista** (≥5% potencial)
+2. **Identificación de Consolidación** ("mar tranquilo" - sideways trading)
+3. **Predicción de Rebotes Pequeños** (1-3%)
+4. **Análisis Multi-Timeframe** (corto/mediano/largo plazo)
+5. **Sistema de Correlaciones** entre criptomonedas
+6. **Generación de Señales Manuales** (para decisión humana)
+
+---
+
+## 🎯 Objetivos del Sistema
+
+### Clasificación de Señales
+- **Intensidad:** Débil, Moderado, Alto, Fuerte
+- **Confianza:** Baja, Media, Alta
+- **Tipos:** Momentum, Consolidación, Rebote, Tendencia
+
+### Target de Performance
+- **Precisión:** >75% para momentum ≥5%
+- **Latencia:** <200ms desde actualización de precio hasta señal
+- **Cobertura:** Todas las monedas con par USDT en Binance
+- **Disponibilidad:** 99.9% uptime
+
+---
+
+## 🏗️ Arquitectura Técnica
+
+### Stack Tecnológico
+```
+- Lenguaje: Python 3.9+
+- Data Source: Binance WebSocket API
+- ML Framework: scikit-learn, XGBoost, TensorFlow/PyTorch
+- Async Framework: asyncio + aiohttp
+- Paralelización: ThreadPoolExecutor + ProcessPoolExecutor
+- Environment: Laptop (optimizado para recursos limitados)
+```
+
+### Estructura de Directorios
+```
+nvbot3/
+├── src/
+│   ├── data/
+│   │   ├── websocket_manager.py     # Gestión de WebSockets Binance
+│   │   ├── data_buffer.py           # Buffer inteligente multi-timeframe
+│   │   └── feature_calculator.py    # Cálculo de indicadores técnicos
+│   ├── models/
+│   │   ├── momentum_detector.py     # Modelo XGBoost + RandomForest
+│   │   ├── regime_classifier.py     # Modelo SVM para regímenes
+│   │   ├── rebound_predictor.py     # Modelo LSTM para rebotes
+│   │   └── correlation_analyzer.py  # Análisis de correlaciones
+│   ├── analysis/
+│   │   ├── multi_timeframe.py       # Análisis multi-timeframe
+│   │   ├── signal_generator.py      # Generación de señales finales
+│   │   └── scoring_system.py        # Sistema débil/moderado/alto/fuerte
+│   ├── utils/
+│   │   ├── config_manager.py        # Gestión de configuración
+│   │   ├── logger.py                # Sistema de logging
+│   │   └── parallel_processor.py    # Optimización de paralelismo
+│   └── main.py                      # Punto de entrada principal
+├── config/
+│   ├── trading_config.yaml          # Configuración de trading
+│   ├── model_config.yaml           # Configuración de modelos ML
+│   └── symbols_config.yaml         # Lista de símbolos a analizar
+├── data/
+│   ├── raw/                         # Datos crudos descargados
+│   ├── processed/                   # Datos procesados con features
+│   └── models/                      # Modelos entrenados guardados
+├── scripts/
+│   ├── download_historical_data.py  # Descarga datos históricos
+│   ├── train_models.py             # Entrenamiento de modelos
+│   └── validate_setup.py           # Validación de configuración
+└── tests/
+    ├── test_websocket.py           # Tests de conectividad
+    ├── test_models.py              # Tests de modelos ML
+    └── test_signals.py             # Tests de generación de señales
+```
+
+---
+
+## 📊 Indicadores Técnicos por Funcionalidad
+
+### 1. Momentum Alcista (≥5%)
+**Indicadores Primarios:**
+- **Rate of Change (ROC):** Período 14, threshold >5%
+- **Average Directional Index (ADX):** Período 14, threshold >25
+- **MACD:** Configuración (12,26,9), crossover + histogram creciente
+
+**Indicadores Secundarios:**
+- **RSI:** Período 14, salida de oversold (>30) con momentum
+- **On-Balance Volume (OBV):** Confirmación de volumen creciente
+- **Bollinger Bands:** Período 20, breakout banda superior
+
+**Lógica de Combinación:**
+```python
+momentum_signal = (
+    (roc > 5.0) and 
+    (adx > 25) and 
+    (macd_line > macd_signal) and
+    (macd_histogram[-1] > macd_histogram[-2]) and
+    (obv_trend == 'rising')
+)
+```
+
+### 2. Consolidación ("Mar Tranquilo")
+**Indicadores Especializados:**
+- **Average True Range (ATR):** Período 14, valores bajos
+- **Bollinger Bands Width:** (Upper - Lower) / Upper * 100 ≤ 0.20
+- **ADX:** Valores <20 indican ausencia de tendencia
+
+**Detección de Consolidación:**
+```python
+consolidation_signal = (
+    (bb_width <= 0.20) and
+    (adx < 20) and
+    (atr < atr_percentile_25) and
+    (volume < volume_ma_20)
+)
+```
+
+### 3. Rebotes Pequeños (1-3%)
+**Enfoque Especializado:**
+- **RSI + MACD:** Para identificar oversold bounces
+- **Volume Analysis:** Rebotes legítimos con volumen creciente
+- **Support Levels:** Rebotes en niveles de soporte psicológico
+
+**Detección de Rebotes:**
+```python
+rebound_signal = (
+    (price_near_support) and
+    (rsi < 35 and rsi_rising) and
+    (volume > volume_ma_10) and
+    (potential_upside <= 3.0)
+)
+```
+
+### 4. Multi-Timeframe Analysis
+**Estructura de Timeframes:**
+- **Corto plazo (5m, 15m):** Entry/exit precision
+- **Mediano plazo (1h, 4h):** Trend confirmation
+- **Largo plazo (1d):** Context y bias general
+
+**Sistema de Cruces SMA:**
+- **Corto:** SMA(5,10,20) vs precio
+- **Mediano:** SMA(20,30,50) crossovers
+- **Largo:** SMA(50,100,200) crossovers
+
+---
+
+## 🤖 Arquitectura de Machine Learning
+
+### Modelo 1: Momentum Detector
+```python
+# Ensemble: XGBoost + Random Forest
+class MomentumDetector:
+    def __init__(self):
+        self.xgb_model = XGBRegressor(
+            n_estimators=200,
+            max_depth=8,
+            learning_rate=0.1
+        )
+        self.rf_model = RandomForestRegressor(
+            n_estimators=100,
+            max_depth=10,
+            min_samples_split=5
+        )
+    
+    def predict(self, features):
+        # Combine predictions with weights: 60% XGB, 40% RF
+        xgb_pred = self.xgb_model.predict(features)
+        rf_pred = self.rf_model.predict(features)
+        return 0.6 * xgb_pred + 0.4 * rf_pred
+```
+
+### Modelo 2: Regime Classifier
+```python
+# SVM para clasificación multi-clase
+class RegimeClassifier:
+    def __init__(self):
+        self.svm_model = SVC(
+            kernel='rbf',
+            C=1.0,
+            probability=True
+        )
+    
+    def predict(self, features):
+        # Returns: 'bullish', 'bearish', 'sideways'
+        return self.svm_model.predict_proba(features)
+```
+
+### Modelo 3: Rebound Predictor
+```python
+# LSTM para secuencias temporales
+class ReboundPredictor:
+    def __init__(self):
+        self.model = tf.keras.Sequential([
+            LSTM(50, return_sequences=True),
+            LSTM(50, return_sequences=False),
+            Dense(25),
+            Dense(1, activation='sigmoid')
+        ])
+    
+    def predict(self, sequence_data):
+        # Returns probability of 1-3% rebound
+        return self.model.predict(sequence_data)
+```
+
+---
+
+## 🔄 Procesamiento en Paralelo (Optimizado para Laptop)
+
+### Configuración de Paralelización
+```python
+import asyncio
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import multiprocessing
+
+# Configuración optimizada para laptop
+CPU_CORES = multiprocessing.cpu_count()
+MAX_THREADS = min(4, CPU_CORES)  # Máximo 4 threads
+MAX_PROCESSES = min(2, CPU_CORES // 2)  # Máximo 2 procesos
+
+class ParallelProcessor:
+    def __init__(self):
+        self.thread_executor = ThreadPoolExecutor(max_workers=MAX_THREADS)
+        self.process_executor = ProcessPoolExecutor(max_workers=MAX_PROCESSES)
+```
+
+### Estrategias por Tipo de Operación
+
+**1. WebSocket Management (asyncio):**
+```python
+async def websocket_manager():
+    # Manejo de múltiples streams sin bloqueo
+    streams = [
+        "btcusdt@kline_5m", "btcusdt@kline_15m", 
+        "ethusdt@kline_5m", "ethusdt@kline_15m"
+    ]
+    
+    tasks = [connect_to_stream(stream) for stream in streams]
+    await asyncio.gather(*tasks)
+```
+
+**2. Feature Calculation (ThreadPoolExecutor):**
+```python
+def calculate_features_parallel(symbol_data):
+    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+        tasks = [
+            executor.submit(calculate_rsi, symbol_data),
+            executor.submit(calculate_macd, symbol_data),
+            executor.submit(calculate_bollinger, symbol_data),
+            executor.submit(calculate_adx, symbol_data)
+        ]
+        return [task.result() for task in tasks]
+```
+
+**3. ML Inference (ProcessPoolExecutor):**
+```python
+def predict_all_models(features):
+    with ProcessPoolExecutor(max_workers=MAX_PROCESSES) as executor:
+        momentum_task = executor.submit(momentum_model.predict, features)
+        regime_task = executor.submit(regime_model.predict, features)
+        
+        momentum_result = momentum_task.result()
+        regime_result = regime_task.result()
+        
+        return momentum_result, regime_result
+```
+
+---
+
+## 📡 WebSocket Data Management
+
+### Configuración de Binance WebSocket
+```python
+class BinanceWebSocketManager:
+    def __init__(self):
+        self.base_url = "wss://stream.binance.com:9443/ws/"
+        self.symbols = ["btcusdt", "ethusdt", "bnbusdt", "adausdt"]
+        self.timeframes = ["5m", "15m", "1h", "4h", "1d"]
+        
+    async def create_multiplex_stream(self):
+        streams = []
+        for symbol in self.symbols:
+            for tf in self.timeframes:
+                streams.append(f"{symbol}@kline_{tf}")
+        
+        stream_url = self.base_url + "/".join(streams)
+        return stream_url
+```
+
+### Buffer Management
+```python
+from collections import deque
+
+class DataBuffer:
+    def __init__(self):
+        self.buffers = {
+            '5m': deque(maxlen=200),   # ~16 horas
+            '15m': deque(maxlen=96),   # ~24 horas  
+            '1h': deque(maxlen=168),   # ~1 semana
+            '4h': deque(maxlen=42),    # ~1 semana
+            '1d': deque(maxlen=30)     # ~1 mes
+        }
+    
+    def update(self, timeframe, kline_data):
+        self.buffers[timeframe].append(kline_data)
+        
+    def get_recent_data(self, timeframe, periods=50):
+        return list(self.buffers[timeframe])[-periods:]
+```
+
+---
+
+## 🎯 Sistema de Scoring y Señales
+
+### Clasificación de Señales
+```python
+class SignalScoring:
+    def __init__(self):
+        self.intensity_thresholds = {
+            'momentum': {'debil': 5, 'moderado': 8, 'alto': 12, 'fuerte': 15},
+            'rebound': {'debil': 1, 'moderado': 1.5, 'alto': 2.5, 'fuerte': 3}
+        }
+        
+        self.confidence_thresholds = {
+            'baja': 0.6, 'media': 0.75, 'alta': 0.85
+        }
+    
+    def classify_signal(self, signal_type, magnitude, confidence):
+        # Determina intensidad y confianza
+        intensity = self._get_intensity(signal_type, magnitude)
+        conf_level = self._get_confidence_level(confidence)
+        
+        return {
+            'type': signal_type,
+            'intensity': intensity,
+            'confidence': conf_level,
+            'magnitude': magnitude,
+            'score': confidence
+        }
+```
+
+### Generación de Señales Finales
+```python
+class SignalGenerator:
+    def generate_comprehensive_signal(self, symbol, analysis_results):
+        signal = {
+            'symbol': symbol,
+            'timestamp': datetime.now(),
+            'momentum': analysis_results.get('momentum'),
+            'regime': analysis_results.get('regime'),
+            'rebound': analysis_results.get('rebound'),
+            'timeframe_consensus': analysis_results.get('timeframes'),
+            'correlations': analysis_results.get('correlations'),
+            'overall_confidence': self._calculate_overall_confidence(analysis_results),
+            'recommended_action': self._determine_action(analysis_results)
+        }
+        
+        return signal
+```
+
+---
+
+## 🔧 Configuración del Proyecto
+
+### Environment Variables (.env)
+```bash
+# Binance API (solo para datos históricos si necesario)
+BINANCE_API_KEY=your_api_key_here
+BINANCE_SECRET_KEY=your_secret_key_here
+
+# Trading Configuration
+SYMBOLS_TO_ANALYZE=BTCUSDT,ETHUSDT,BNBUSDT,ADAUSDT,SOLUSDT
+MIN_MOMENTUM_THRESHOLD=5.0
+MIN_CONFIDENCE_THRESHOLD=0.75
+MAX_SIGNALS_PER_HOUR=10
+
+# System Configuration
+LOG_LEVEL=INFO
+ENABLE_PARALLEL_PROCESSING=true
+MAX_THREADS=4
+MAX_PROCESSES=2
+WEBSOCKET_RECONNECT_DELAY=5
+
+# Model Configuration
+MODEL_RETRAIN_INTERVAL_HOURS=24
+FEATURE_CALCULATION_BATCH_SIZE=15
+```
+
+### Requirements.txt
+```
+numpy>=1.21.0
+pandas>=1.5.0
+scikit-learn>=1.2.0
+xgboost>=1.7.0
+tensorflow>=2.10.0  # Para LSTM
+aiohttp>=3.8.0
+websockets>=10.4
+python-dotenv>=0.19.0
+pyyaml>=6.0
+ta>=0.10.2  # Technical Analysis library
+ccxt>=4.0.0  # Para datos históricos
+joblib>=1.2.0  # Para guardar modelos
+asyncio-mqtt>=0.11.0  # Si usas notificaciones
+```
+
+---
+
+## 📈 Features para Machine Learning
+
+### Feature Engineering Detallado
+```python
+def calculate_comprehensive_features(ohlcv_data):
+    features = {}
+    
+    # Price-based features
+    features['rsi_14'] = calculate_rsi(ohlcv_data['close'], 14)
+    features['rsi_7'] = calculate_rsi(ohlcv_data['close'], 7)
+    features['macd'] = calculate_macd(ohlcv_data['close'])
+    features['macd_signal'] = calculate_macd_signal(ohlcv_data['close'])
+    features['macd_histogram'] = features['macd'] - features['macd_signal']
+    
+    # Volatility features
+    features['bb_upper'], features['bb_lower'] = calculate_bollinger_bands(ohlcv_data['close'])
+    features['bb_width'] = (features['bb_upper'] - features['bb_lower']) / features['bb_upper']
+    features['atr'] = calculate_atr(ohlcv_data, 14)
+    
+    # Trend features
+    features['adx'] = calculate_adx(ohlcv_data, 14)
+    features['sma_5'] = ohlcv_data['close'].rolling(5).mean()
+    features['sma_20'] = ohlcv_data['close'].rolling(20).mean()
+    features['sma_50'] = ohlcv_data['close'].rolling(50).mean()
+    
+    # Volume features
+    features['obv'] = calculate_obv(ohlcv_data)
+    features['volume_sma'] = ohlcv_data['volume'].rolling(20).mean()
+    features['volume_ratio'] = ohlcv_data['volume'] / features['volume_sma']
+    
+    # Rate of change features
+    features['roc_5'] = calculate_roc(ohlcv_data['close'], 5)
+    features['roc_10'] = calculate_roc(ohlcv_data['close'], 10)
+    features['roc_20'] = calculate_roc(ohlcv_data['close'], 20)
+    
+    # Time-based features
+    features['hour'] = ohlcv_data.index.hour
+    features['day_of_week'] = ohlcv_data.index.dayofweek
+    features['month'] = ohlcv_data.index.month
+    
+    return features
+```
+
+### Target Variable Creation
+```python
+def create_targets(ohlcv_data):
+    targets = {}
+    
+    # Momentum target (≥5% in next 24 periods)
+    future_max = ohlcv_data['close'].rolling(24).max().shift(-24)
+    targets['momentum_5pct'] = (future_max / ohlcv_data['close']) >= 1.05
+    
+    # Rebound target (1-3% in next 8 periods)
+    future_max_short = ohlcv_data['close'].rolling(8).max().shift(-8)
+    rebound_magnitude = future_max_short / ohlcv_data['close']
+    targets['rebound_small'] = (rebound_magnitude >= 1.01) & (rebound_magnitude <= 1.03)
+    
+    # Regime classification (next 12 periods)
+    future_trend = calculate_trend_direction(ohlcv_data['close'].shift(-12))
+    targets['regime'] = future_trend  # 'bullish', 'bearish', 'sideways'
+    
+    return targets
+```
+
+---
+
+## 🚀 Plan de Implementación
+
+### Fase 1: Foundation (Semana 1)
+1. **Setup del proyecto y estructura de directorios**
+2. **WebSocket connection a Binance**
+3. **Data buffer implementation**
+4. **Feature calculation básico**
+
+### Fase 2: ML Pipeline (Semana 2)
+1. **Download historical data**
+2. **Feature engineering completo**
+3. **Model training y validation**
+4. **Inference pipeline**
+
+### Fase 3: Signal Generation (Semana 3)
+1. **Multi-timeframe analysis**
+2. **Signal scoring system**
+3. **Correlation analysis**
+4. **Real-time signal generation**
+
+### Fase 4: Optimization (Semana 4)
+1. **Parallel processing optimization**
+2. **Performance monitoring**
+3. **Error handling y robustez**
+4. **Testing y validation completa**
+
+---
+
+## ⚠️ Consideraciones Importantes
+
+### Limitaciones de Laptop
+- **CPU:** Usar máximo 75% de cores disponibles
+- **Memory:** Limitar buffers por símbolo para evitar swap
+- **Storage:** Implementar rotación de logs y cleanup de datos antiguos
+
+### Error Handling
+- **WebSocket disconnections:** Auto-reconnect con backoff exponencial
+- **Model failures:** Fallback a modelos alternativos
+- **Data quality:** Validación de datos antes de features calculation
+
+### Monitoring
+- **Performance metrics:** Latencia, memory usage, CPU usage
+- **Signal quality:** Track de precisión de señales históricas
+- **System health:** WebSocket status, model health checks
+
+---
+
+## 📚 Referencias y Documentación
+
+### APIs y Libraries
+- **Binance WebSocket:** https://binance-docs.github.io/apidocs/spot/en/#websocket-market-streams
+- **XGBoost:** https://xgboost.readthedocs.io/
+- **scikit-learn:** https://scikit-learn.org/stable/
+- **TensorFlow:** https://www.tensorflow.org/
+
+### Technical Analysis
+- **Indicadores implementados según estándares de TradingView**
+- **Fórmulas validadas contra TA-Lib library**
+- **Backtesting basado en principios de Walk-Forward Analysis**
+
+---
+
+## 🎯 Métricas de Éxito
+
+### Performance Targets
+- **Momentum Detection:** >75% accuracy para movimientos ≥5%
+- **Regime Classification:** >80% accuracy para clasificación de tendencias
+- **Small Rebounds:** >70% accuracy para rebotes 1-3%
+- **System Latency:** <200ms desde data update hasta signal generation
+
+### Quality Metrics
+- **False Positive Rate:** <20% para todas las categorías de señales
+- **Signal Frequency:** 5-15 señales de calidad por día por símbolo
+- **Correlation Accuracy:** >85% detección de patrones correlacionados
+
+---
+
+*Este documento sirve como contexto completo para el desarrollo de NvBot3. Debe ser actualizado conforme el proyecto evolucione y se agreguen nuevas funcionalidades.*

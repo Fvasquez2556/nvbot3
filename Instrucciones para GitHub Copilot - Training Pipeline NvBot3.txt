@@ -1,0 +1,531 @@
+# 🤖 Instrucciones para GitHub Copilot - Training Pipeline NvBot3
+
+## 🔧 Setup y Configuración del Entorno
+
+### Instrucción #1: Configuración del Proyecto
+```bash
+# Copilot: Siempre usar el entorno virtual para todas las operaciones
+# Crear estas instrucciones en un script setup.py
+
+# 1. Crear entorno virtual
+python -m venv nvbot3_env
+
+# 2. Activar entorno (Windows)
+nvbot3_env\Scripts\activate
+# Activar entorno (Linux/Mac)  
+source nvbot3_env/bin/activate
+
+# 3. Upgrade pip
+python -m pip install --upgrade pip
+
+# 4. Instalar dependencias
+pip install -r requirements.txt
+
+# 5. Verificar instalación
+python -c "import numpy, pandas, sklearn, xgboost; print('All dependencies installed successfully')"
+```
+
+**IMPORTANTE para Copilot:** Todas las ejecuciones de Python deben usar el entorno virtual activado. Si abres nueva terminal, incluir siempre la activación del entorno.
+
+---
+
+## 📊 Módulo 1: Historical Data Downloader
+
+### Archivo: `scripts/download_historical_data.py`
+
+**Objetivo:** Descargar 2+ años de datos históricos de Binance para entrenamiento
+
+**Especificaciones técnicas:**
+- **Símbolos:** BTCUSDT, ETHUSDT, BNBUSDT, ADAUSDT, SOLUSDT (expandir después)
+- **Timeframes:** 5m, 15m, 1h, 4h, 1d
+- **Período:** Desde enero 2022 hasta presente
+- **Formato:** Guardar como CSV en `data/raw/{symbol}_{timeframe}.csv`
+- **Rate limiting:** Respetar límites de Binance API (máximo 1200 requests/minuto)
+
+**Estructura de datos requerida:**
+```python
+columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 
+           'close_time', 'quote_asset_volume', 'number_of_trades', 
+           'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume']
+```
+
+**Funcionalidades requeridas:**
+1. **Progress tracking:** Mostrar progreso de descarga por símbolo/timeframe
+2. **Resume capability:** Poder continuar descarga si se interrumpe
+3. **Data validation:** Verificar que no hay gaps mayores a timeframe * 2
+4. **Error handling:** Retry automático con backoff exponencial
+5. **Memory efficiency:** Procesar en chunks para evitar saturar RAM
+
+**Código base solicitado:**
+```python
+import ccxt
+import pandas as pd
+import time
+from datetime import datetime, timedelta
+import os
+from tqdm import tqdm
+
+class HistoricalDataDownloader:
+    def __init__(self):
+        # Inicializar conexión Binance
+        # Configurar rate limiting
+        # Setup de directorios
+        pass
+    
+    def download_symbol_timeframe(self, symbol, timeframe, start_date, end_date):
+        # Implementar descarga por chunks
+        # Manejar rate limiting
+        # Validar datos descargados
+        pass
+    
+    def download_all_data(self):
+        # Iterar sobre todos los símbolos y timeframes
+        # Mostrar progreso general
+        # Manejar errores y reintentos
+        pass
+```
+
+---
+
+## 🔍 Módulo 2: Data Validator
+
+### Archivo: `src/data/data_validator.py`
+
+**Objetivo:** Validar calidad de datos históricos antes del entrenamiento
+
+**Validaciones requeridas:**
+1. **Completeness check:** Sin gaps > 2 períodos consecutivos
+2. **Price validity:** No cambios > 50% en un período
+3. **Volume validity:** Volume > 0 en 95%+ de los registros
+4. **Outlier detection:** Identificar y manejar outliers extremos
+5. **Temporal consistency:** Timestamps en orden cronológico
+
+**Código base solicitado:**
+```python
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Tuple
+
+class DataValidator:
+    def __init__(self, tolerance_config: Dict):
+        # Configurar tolerancias para validación
+        pass
+    
+    def validate_dataset(self, df: pd.DataFrame, symbol: str, timeframe: str) -> Dict:
+        # Ejecutar todas las validaciones
+        # Retornar reporte detallado
+        pass
+    
+    def fix_common_issues(self, df: pd.DataFrame) -> pd.DataFrame:
+        # Forward fill para gaps pequeños
+        # Interpolación para outliers menores
+        # Logging de modificaciones
+        pass
+    
+    def generate_quality_report(self, validation_results: Dict) -> str:
+        # Crear reporte legible para humanos
+        # Incluir recomendaciones de acción
+        pass
+```
+
+---
+
+## ⚙️ Módulo 3: Feature Engineer
+
+### Archivo: `src/data/feature_calculator.py`
+
+**Objetivo:** Calcular todos los indicadores técnicos y features para ML
+
+**Features requeridos según el documento de contexto:**
+
+**Grupo 1: Price-based indicators**
+- RSI (7, 14, 21 períodos)
+- MACD (12,26,9) + Signal + Histogram
+- Bollinger Bands (20,2) + Width + Position
+- SMA (5,10,20,50,100,200)
+- EMA (12,26,50)
+
+**Grupo 2: Volatility indicators**
+- ATR (14)
+- Bollinger Band Width
+- Price deviation from moving averages
+
+**Grupo 3: Momentum indicators**
+- Rate of Change (5,10,20 períodos)
+- ADX (14)
+- Stochastic (14,3,3)
+- Williams %R (14)
+
+**Grupo 4: Volume indicators**
+- On-Balance Volume (OBV)
+- Volume SMA (20)
+- Volume ratio vs average
+- Volume Rate of Change
+
+**Grupo 5: Pattern features**
+- Support/Resistance levels
+- Trend direction (short/medium/long)
+- Consolidation detection
+- Breakout patterns
+
+**Código base solicitado:**
+```python
+import pandas as pd
+import numpy as np
+import ta  # Technical Analysis library
+
+class FeatureCalculator:
+    def __init__(self):
+        # Configurar parámetros de indicadores
+        pass
+    
+    def calculate_all_features(self, ohlcv_df: pd.DataFrame) -> pd.DataFrame:
+        # Calcular todos los grupos de features
+        # Manejar NaN values apropiadamente
+        # Normalizar features cuando sea necesario
+        pass
+    
+    def calculate_price_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        # RSI, MACD, Bollinger Bands, Moving Averages
+        pass
+    
+    def calculate_volatility_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        # ATR, BB Width, Price deviations
+        pass
+    
+    def calculate_momentum_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        # ROC, ADX, Stochastic, Williams %R
+        pass
+    
+    def calculate_volume_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        # OBV, Volume patterns, Volume ratios
+        pass
+    
+    def validate_features(self, features_df: pd.DataFrame) -> Dict:
+        # Verificar que features están en rangos esperados
+        # Detectar features con demasiados NaN
+        # Calcular correlaciones entre features
+        pass
+```
+
+---
+
+## 🎯 Módulo 4: Target Creator
+
+### Archivo: `src/data/target_creator.py`
+
+**Objetivo:** Crear variables target para cada modelo según especificaciones
+
+**Targets requeridos:**
+
+**1. Momentum Target (≥5%)**
+```python
+def create_momentum_target(close_prices, lookforward_periods=48):
+    # Buscar máximo precio en próximos 48 períodos (4 horas en 5m)
+    # Target = 1 si (max_future_price / current_price) >= 1.05
+    # Target = 0 en caso contrario
+    pass
+```
+
+**2. Rebound Target (1-3%)**
+```python
+def create_rebound_target(close_prices, lookforward_periods=24):
+    # Buscar rebote de 1-3% en próximos 24 períodos (2 horas en 5m)
+    # Target = 1 si rebote está en rango 1%-3%
+    # Target = 0 en caso contrario
+    pass
+```
+
+**3. Regime Target (Clasificación)**
+```python
+def create_regime_target(close_prices, lookforward_periods=96):
+    # Analizar tendencia en próximos 96 períodos (8 horas en 5m)
+    # Target = 'bullish', 'bearish', 'sideways'
+    # Basado en slope y volatilidad del período
+    pass
+```
+
+**Código base solicitado:**
+```python
+import pandas as pd
+import numpy as np
+from scipy import stats
+
+class TargetCreator:
+    def __init__(self, config: Dict):
+        # Configurar parámetros para cada tipo de target
+        pass
+    
+    def create_all_targets(self, ohlcv_df: pd.DataFrame) -> pd.DataFrame:
+        # Crear todos los targets y combinar
+        # Manejar edge cases al final de los datos
+        pass
+    
+    def create_momentum_targets(self, close_prices: pd.Series) -> pd.Series:
+        # Implementar lógica de momentum ≥5%
+        pass
+    
+    def create_rebound_targets(self, close_prices: pd.Series) -> pd.Series:
+        # Implementar lógica de rebotes 1-3%
+        pass
+    
+    def create_regime_targets(self, ohlcv_df: pd.DataFrame) -> pd.Series:
+        # Implementar clasificación bullish/bearish/sideways
+        pass
+    
+    def validate_targets(self, targets_df: pd.DataFrame) -> Dict:
+        # Verificar distribución de targets
+        # Asegurar que no hay data leakage
+        # Calcular estadísticas descriptivas
+        pass
+```
+
+---
+
+## 🤖 Módulo 5: Model Training Pipeline
+
+### Archivo: `scripts/train_models.py`
+
+**Objetivo:** Entrenar y validar todos los modelos con metodología correcta
+
+**Modelos a entrenar:**
+1. **Momentum Detector:** XGBoost + RandomForest ensemble
+2. **Regime Classifier:** SVM multiclass
+3. **Rebound Predictor:** LSTM neural network
+
+**Metodología requerida:**
+- **Temporal split:** 70% train, 15% validation, 15% test
+- **No data leakage:** Estricto orden temporal
+- **Cross-validation:** TimeSeriesSplit para hyperparameter tuning
+- **Early stopping:** Para prevenir overfitting
+- **Walk-forward validation:** Para validación final
+
+**Código base solicitado:**
+```python
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+import xgboost as xgb
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVC
+import tensorflow as tf
+import joblib
+
+class ModelTrainer:
+    def __init__(self, config: Dict):
+        # Configurar parámetros de modelos
+        # Setup de métricas de evaluación
+        pass
+    
+    def temporal_split(self, df: pd.DataFrame) -> Tuple:
+        # Implementar split temporal sin leakage
+        pass
+    
+    def train_momentum_model(self, X_train, y_train, X_val, y_val):
+        # Entrenar ensemble XGBoost + RandomForest
+        # Hyperparameter tuning con TimeSeriesSplit
+        # Validación y early stopping
+        pass
+    
+    def train_regime_model(self, X_train, y_train, X_val, y_val):
+        # Entrenar SVM multiclass
+        # Optimizar parámetros C y gamma
+        pass
+    
+    def train_rebound_model(self, X_train, y_train, X_val, y_val):
+        # Construir y entrenar LSTM
+        # Secuencias temporales apropiadas
+        pass
+    
+    def evaluate_model(self, model, X_test, y_test, model_type):
+        # Calcular métricas específicas de trading
+        # Directional accuracy, precision/recall por clase
+        # Sharpe ratio simulado
+        pass
+    
+    def walk_forward_validation(self, df: pd.DataFrame, model, periods=6):
+        # Implementar validación walk-forward
+        # Simular reentrenamiento periódico
+        pass
+    
+    def save_models(self, models: Dict, metrics: Dict):
+        # Guardar modelos entrenados
+        # Guardar métricas de performance
+        # Crear reporte de entrenamiento
+        pass
+```
+
+---
+
+## 📋 Script Principal de Entrenamiento
+
+### Archivo: `scripts/full_training_pipeline.py`
+
+**Objetivo:** Orchestrar todo el proceso de entrenamiento
+
+**Flujo completo:**
+1. Activar entorno virtual
+2. Descargar/verificar datos históricos
+3. Validar calidad de datos
+4. Calcular features
+5. Crear targets
+6. Entrenar modelos
+7. Validar y guardar resultados
+
+**Código base solicitado:**
+```python
+import os
+import sys
+import logging
+from datetime import datetime
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def main():
+    logger.info("Starting NvBot3 training pipeline...")
+    
+    # 1. Verificar entorno virtual
+    if 'nvbot3_env' not in sys.executable:
+        logger.error("Virtual environment not active!")
+        sys.exit(1)
+    
+    # 2. Setup directorios
+    ensure_directories()
+    
+    # 3. Descargar datos históricos
+    downloader = HistoricalDataDownloader()
+    downloader.download_all_data()
+    
+    # 4. Validar datos
+    validator = DataValidator(config)
+    validation_results = validator.validate_all_datasets()
+    
+    # 5. Calcular features
+    feature_calc = FeatureCalculator()
+    features_data = feature_calc.process_all_symbols()
+    
+    # 6. Crear targets
+    target_creator = TargetCreator(config)
+    targets_data = target_creator.create_all_targets(features_data)
+    
+    # 7. Entrenar modelos
+    trainer = ModelTrainer(config)
+    models, metrics = trainer.train_all_models(features_data, targets_data)
+    
+    # 8. Guardar resultados
+    trainer.save_models(models, metrics)
+    
+    logger.info("Training pipeline completed successfully!")
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## ⚙️ Configuración y Dependencias
+
+### Archivo: `requirements.txt` (específico para entrenamiento)
+```
+numpy==1.24.3
+pandas==2.0.3
+scikit-learn==1.3.0
+xgboost==1.7.6
+tensorflow==2.13.0
+ccxt==4.0.78
+ta==0.10.2
+joblib==1.3.1
+tqdm==4.65.0
+scipy==1.11.1
+matplotlib==3.7.2
+seaborn==0.12.2
+python-dotenv==1.0.0
+pyyaml==6.0.1
+```
+
+### Archivo: `config/training_config.yaml`
+```yaml
+data:
+  symbols: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT']
+  timeframes: ['5m', '15m', '1h', '4h', '1d']
+  start_date: '2022-01-01'
+  lookback_periods: 200
+
+models:
+  momentum:
+    xgb_params:
+      n_estimators: 200
+      max_depth: 8
+      learning_rate: 0.1
+      subsample: 0.8
+    rf_params:
+      n_estimators: 100
+      max_depth: 10
+      min_samples_split: 5
+
+  regime:
+    svm_params:
+      C: 1.0
+      kernel: 'rbf'
+      gamma: 'scale'
+
+  rebound:
+    lstm_params:
+      sequence_length: 24
+      lstm_units: 50
+      dropout: 0.2
+      epochs: 100
+
+validation:
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  cv_folds: 5
+  walk_forward_periods: 6
+```
+
+---
+
+## 🎯 Comandos de Ejecución
+
+### Para GitHub Copilot: Secuencia de comandos a usar
+
+```bash
+# 1. Activar entorno (SIEMPRE PRIMERO)
+nvbot3_env\Scripts\activate  # Windows
+# source nvbot3_env/bin/activate  # Linux/Mac
+
+# 2. Instalar dependencias si es primera vez
+pip install -r requirements.txt
+
+# 3. Ejecutar pipeline completo de entrenamiento
+python scripts/full_training_pipeline.py
+
+# 4. O ejecutar módulos individuales para testing
+python scripts/download_historical_data.py
+python -m src.data.feature_calculator --symbol BTCUSDT --timeframe 5m
+python scripts/train_models.py --model momentum
+
+# 5. Validar resultados
+python scripts/validate_trained_models.py
+```
+
+---
+
+## ⚠️ Instrucciones Críticas para Copilot
+
+1. **SIEMPRE verificar que el entorno virtual está activo antes de cualquier operación**
+2. **Usar temporal splits, NUNCA random splits para datos financieros**
+3. **Implementar progress bars para operaciones largas (tqdm)**
+4. **Incluir extensive error handling y logging**
+5. **Validar datos en cada paso antes de continuar**
+6. **Guardar checkpoints para poder resumir procesos largos**
+7. **Usar configuración YAML para parametrización, no hardcoding**
+8. **Implementar memory-efficient processing para datasets grandes**
+
+---
+
+*Estas instrucciones deben seguirse estrictamente para asegurar un entrenamiento robusto y calibrado del NvBot3.*
