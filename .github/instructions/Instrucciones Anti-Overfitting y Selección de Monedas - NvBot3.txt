@@ -1,0 +1,1568 @@
+# 🛡️ Instrucciones Anti-Overfitting y Selección de Monedas - NvBot3
+
+## 📋 CONTEXTO CRÍTICO PARA EL AGENTE
+
+**ESTAS INSTRUCCIONES SON CRÍTICAS PARA PREVENIR PÉRDIDAS REALES DE DINERO EN TRADING**
+
+El overfitting en trading bots es **extremadamente peligroso** porque significa que el modelo funciona perfectamente en backtesting pero falla miserablemente en trading real, causando pérdidas financieras significativas.
+
+---
+
+## 🎯 OBJETIVOS DE IMPLEMENTACIÓN
+
+### Objetivo Principal
+Crear un sistema de machine learning **robusto** que funcione en diferentes condiciones de mercado y **NO** se especialice demasiado en datos históricos específicos.
+
+### Deliverables Específicos
+1. **Sistema de validación temporal estricta**
+2. **Walk-forward validation implementation**
+3. **Regularización agresiva en todos los modelos**
+4. **Detección automática de overfitting**
+5. **Auto-reentrenamiento inteligente**
+6. **Selección estratégica de 30 monedas**
+7. **Configuration actualizada para anti-overfitting**
+
+---
+
+## 💰 SELECCIÓN ESTRATÉGICA DE 30 MONEDAS
+
+### Actualizar: `config/trading_config.yaml`
+
+```yaml
+# IMPORTANTE: Reemplazar la sección de symbols con esta selección estratégica
+
+symbols:
+  # Tier 1: Blue Chips (10 monedas) - Liquidez alta, estabilidad relativa
+  tier_1:
+    - 'BTCUSDT'    # Store of value, market leader
+    - 'ETHUSDT'    # Smart contracts platform
+    - 'BNBUSDT'    # Exchange token, high volume
+    - 'ADAUSDT'    # Research-based Layer 1
+    - 'SOLUSDT'    # High-performance Layer 1
+    - 'XRPUSDT'    # Cross-border payments
+    - 'DOTUSDT'    # Interoperability protocol
+    - 'LINKUSDT'   # Oracle network leader
+    - 'MATICUSDT'  # Polygon scaling solution
+    - 'AVAXUSDT'   # Enterprise blockchain
+
+  # Tier 2: Strong Alts (10 monedas) - DeFi leaders, strong fundamentals
+  tier_2:
+    - 'UNIUSDT'    # DEX leader
+    - 'AAVEUSDT'   # Lending protocol leader
+    - 'MKRUSDT'    # Decentralized stablecoin
+    - 'SUSHIUSDT'  # Community-driven DEX
+    - 'COMPUSDT'   # Lending protocol
+    - 'YFIUSDT'    # Yield farming aggregator
+    - 'SNXUSDT'    # Derivatives protocol
+    - 'CRVUSDT'    # Stablecoin DEX
+    - '1INCHUSDT'  # DEX aggregator
+    - 'ALPHAUSDT'  # Cross-chain DeFi
+
+  # Tier 3: Emerging Sectors (10 monedas) - Gaming, AI, IoT diversity
+  tier_3:
+    - 'SANDUSDT'   # Gaming/Metaverse leader
+    - 'MANAUSDT'   # Virtual worlds platform
+    - 'ENJUSDT'    # Gaming ecosystem
+    - 'CHZUSDT'    # Sports/Entertainment
+    - 'BATUSDT'    # Digital advertising
+    - 'ZRXUSDT'    # DEX protocol
+    - 'STORJUSDT'  # Decentralized storage
+    - 'OCEANUSDT'  # AI/Data marketplace
+    - 'FETUSDT'    # AI autonomous agents
+    - 'IOTAUSDT'   # IoT ecosystem
+
+# Criterios de selección aplicados:
+selection_criteria:
+  min_market_cap: 1_000_000_000  # >$1B USD
+  min_24h_volume: 100_000_000    # >$100M USD diario
+  min_binance_history: 730       # >2 años en Binance
+  sector_diversity: true         # Diferentes sectores representados
+  correlation_limit: 0.85        # Máximo 85% correlación entre monedas
+```
+
+---
+
+## 🛡️ MÓDULO 1: Sistema de Validación Temporal Estricta
+
+### Crear: `src/validation/temporal_validator.py`
+
+```python
+"""
+Sistema de validación temporal para prevenir overfitting en trading.
+NUNCA usar random splits en datos financieros.
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+from typing import Tuple, Dict, List
+import logging
+
+class TemporalValidator:
+    """
+    Validador temporal estricto para datos de trading.
+    Asegura que NUNCA se use información futura para predecir el pasado.
+    """
+    
+    def __init__(self, train_ratio: float = 0.7, val_ratio: float = 0.15, test_ratio: float = 0.15):
+        """
+        Inicializar validador temporal.
+        
+        Args:
+            train_ratio: Porcentaje para entrenamiento (datos más antiguos)
+            val_ratio: Porcentaje para validación (datos intermedios)
+            test_ratio: Porcentaje para testing (datos más recientes)
+        """
+        assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, "Ratios deben sumar 1.0"
+        
+        self.train_ratio = train_ratio
+        self.val_ratio = val_ratio
+        self.test_ratio = test_ratio
+        self.logger = logging.getLogger(__name__)
+    
+    def temporal_split(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """
+        Split temporal estricto - datos más antiguos para train, más recientes para test.
+        
+        Args:
+            df: DataFrame con index temporal ordenado
+            
+        Returns:
+            train_data, val_data, test_data
+        """
+        # Verificar que el DataFrame está ordenado temporalmente
+        if not df.index.is_monotonic_increasing:
+            self.logger.warning("DataFrame no está ordenado temporalmente. Ordenando...")
+            df = df.sort_index()
+        
+        total_len = len(df)
+        train_end = int(total_len * self.train_ratio)
+        val_end = int(total_len * (self.train_ratio + self.val_ratio))
+        
+        train_data = df.iloc[:train_end].copy()
+        val_data = df.iloc[train_end:val_end].copy()
+        test_data = df.iloc[val_end:].copy()
+        
+        # Logging de fechas para verificación
+        self.logger.info(f"Temporal Split ejecutado:")
+        self.logger.info(f"  Train: {train_data.index[0]} a {train_data.index[-1]} ({len(train_data)} samples)")
+        self.logger.info(f"  Val:   {val_data.index[0]} a {val_data.index[-1]} ({len(val_data)} samples)")
+        self.logger.info(f"  Test:  {test_data.index[0]} a {test_data.index[-1]} ({len(test_data)} samples)")
+        
+        # Verificación crítica: no overlap temporal
+        assert train_data.index[-1] < val_data.index[0], "❌ CRITICAL: Train y Val se superponen temporalmente!"
+        assert val_data.index[-1] < test_data.index[0], "❌ CRITICAL: Val y Test se superponen temporalmente!"
+        
+        return train_data, val_data, test_data
+    
+    def validate_no_data_leakage(self, train_data: pd.DataFrame, val_data: pd.DataFrame, test_data: pd.DataFrame) -> bool:
+        """
+        Verificar que no existe data leakage temporal.
+        
+        Returns:
+            True si no hay leakage, False si lo hay
+        """
+        checks = []
+        
+        # Check 1: Orden temporal estricto
+        temporal_order = (train_data.index[-1] < val_data.index[0] and 
+                         val_data.index[-1] < test_data.index[0])
+        checks.append(("Orden temporal", temporal_order))
+        
+        # Check 2: No fechas duplicadas entre sets
+        train_dates = set(train_data.index)
+        val_dates = set(val_data.index)
+        test_dates = set(test_data.index)
+        
+        no_overlap = (len(train_dates & val_dates) == 0 and 
+                     len(val_dates & test_dates) == 0 and 
+                     len(train_dates & test_dates) == 0)
+        checks.append(("Sin overlap de fechas", no_overlap))
+        
+        # Check 3: Gaps temporales razonables
+        train_to_val_gap = (val_data.index[0] - train_data.index[-1]).total_seconds() / 3600
+        val_to_test_gap = (test_data.index[0] - val_data.index[-1]).total_seconds() / 3600
+        
+        reasonable_gaps = train_to_val_gap < 168 and val_to_test_gap < 168  # <1 semana de gap
+        checks.append(("Gaps temporales razonables", reasonable_gaps))
+        
+        # Logging de resultados
+        for check_name, result in checks:
+            if result:
+                self.logger.info(f"✅ {check_name}: PASS")
+            else:
+                self.logger.error(f"❌ {check_name}: FAIL")
+        
+        return all(result for _, result in checks)
+
+class CryptoTimeSeriesSplit:
+    """
+    Cross-validation temporal para criptomonedas.
+    Implementa Time Series Split respetando la naturaleza temporal de los datos.
+    """
+    
+    def __init__(self, n_splits: int = 5, test_size_months: int = 2):
+        """
+        Inicializar Time Series Split para crypto.
+        
+        Args:
+            n_splits: Número de splits para CV
+            test_size_months: Tamaño del test set en meses
+        """
+        self.n_splits = n_splits
+        self.test_size_months = test_size_months
+        self.logger = logging.getLogger(__name__)
+    
+    def split(self, df: pd.DataFrame) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
+        """
+        Generar splits temporales para cross-validation.
+        
+        Args:
+            df: DataFrame con datos ordenados temporalmente
+            
+        Yields:
+            (train_data, test_data) para cada split
+        """
+        splits = []
+        total_len = len(df)
+        
+        # Calcular tamaño aproximado de test en samples
+        # Asumiendo datos de 5 minutos: ~288 samples por día, ~8640 por mes
+        samples_per_month = 8640  # Aproximado para 5m timeframe
+        test_size = self.test_size_months * samples_per_month
+        
+        # Calcular incremento para cada split
+        increment = (total_len - test_size) // self.n_splits
+        
+        for i in range(self.n_splits):
+            # Definir índices de train y test
+            train_start = 0
+            train_end = increment * (i + 1)
+            test_start = train_end
+            test_end = min(train_end + test_size, total_len)
+            
+            # Crear splits
+            train_data = df.iloc[train_start:train_end].copy()
+            test_data = df.iloc[test_start:test_end].copy()
+            
+            # Verificar que tenemos suficientes datos
+            if len(train_data) < 1000 or len(test_data) < 100:
+                self.logger.warning(f"Split {i+1}: Datos insuficientes (train: {len(train_data)}, test: {len(test_data)})")
+                continue
+            
+            # Verificar orden temporal
+            if train_data.index[-1] >= test_data.index[0]:
+                self.logger.error(f"❌ Split {i+1}: Violación de orden temporal")
+                continue
+            
+            self.logger.info(f"Split {i+1}: Train({len(train_data)}) Test({len(test_data)})")
+            splits.append((train_data, test_data))
+        
+        return splits
+```
+
+---
+
+## 🔄 MÓDULO 2: Walk-Forward Validation
+
+### Crear: `src/validation/walk_forward_validator.py`
+
+```python
+"""
+Walk-Forward Validation - El gold standard para validación en trading.
+Simula el reentrenamiento periódico que ocurre en trading real.
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional
+import joblib
+import logging
+from dataclasses import dataclass
+
+@dataclass
+class WalkForwardResult:
+    """Resultado de un período de walk-forward validation."""
+    period_start: datetime
+    period_end: datetime
+    train_size: int
+    test_size: int
+    model_performance: Dict[str, float]
+    predictions: np.ndarray
+    actuals: np.ndarray
+    market_regime: str
+    confidence_scores: np.ndarray
+
+class WalkForwardValidator:
+    """
+    Implementa Walk-Forward Validation para simular trading real.
+    Reentrena el modelo periódicamente con nuevos datos.
+    """
+    
+    def __init__(self, 
+                 initial_train_months: int = 6,
+                 test_months: int = 1,
+                 retrain_frequency_months: int = 1,
+                 min_train_samples: int = 5000):
+        """
+        Configurar Walk-Forward Validation.
+        
+        Args:
+            initial_train_months: Meses iniciales para entrenamiento
+            test_months: Meses para cada período de testing
+            retrain_frequency_months: Frecuencia de reentrenamiento
+            min_train_samples: Mínimo de samples para entrenar
+        """
+        self.initial_train_months = initial_train_months
+        self.test_months = test_months
+        self.retrain_frequency = retrain_frequency_months
+        self.min_train_samples = min_train_samples
+        self.logger = logging.getLogger(__name__)
+    
+    def validate(self, df: pd.DataFrame, model_class: Any, model_params: Dict) -> List[WalkForwardResult]:
+        """
+        Ejecutar Walk-Forward Validation completa.
+        
+        Args:
+            df: DataFrame con features y targets
+            model_class: Clase del modelo a entrenar
+            model_params: Parámetros del modelo
+            
+        Returns:
+            Lista de resultados por período
+        """
+        results = []
+        
+        # Calcular samples por mes (aproximado para 5m timeframe)
+        samples_per_month = len(df) // ((df.index[-1] - df.index[0]).days / 30)
+        
+        initial_train_samples = int(self.initial_train_months * samples_per_month)
+        test_samples = int(self.test_months * samples_per_month)
+        step_samples = int(self.retrain_frequency * samples_per_month)
+        
+        # Verificar que tenemos suficientes datos
+        if len(df) < initial_train_samples + test_samples:
+            raise ValueError("Datos insuficientes para Walk-Forward Validation")
+        
+        self.logger.info(f"Iniciando Walk-Forward Validation:")
+        self.logger.info(f"  Datos totales: {len(df)} samples")
+        self.logger.info(f"  Train inicial: {initial_train_samples} samples ({self.initial_train_months} meses)")
+        self.logger.info(f"  Test size: {test_samples} samples ({self.test_months} meses)")
+        self.logger.info(f"  Reentrenamiento cada: {step_samples} samples ({self.retrain_frequency} meses)")
+        
+        # Iterar sobre períodos de tiempo
+        current_pos = initial_train_samples
+        iteration = 0
+        
+        while current_pos + test_samples <= len(df):
+            iteration += 1
+            
+            # Definir períodos de train y test
+            train_start = max(0, current_pos - initial_train_samples)
+            train_end = current_pos
+            test_start = current_pos
+            test_end = min(current_pos + test_samples, len(df))
+            
+            # Extraer datos
+            train_data = df.iloc[train_start:train_end]
+            test_data = df.iloc[test_start:test_end]
+            
+            # Verificar tamaño mínimo
+            if len(train_data) < self.min_train_samples:
+                self.logger.warning(f"Iteración {iteration}: Train data insuficiente ({len(train_data)} < {self.min_train_samples})")
+                current_pos += step_samples
+                continue
+            
+            self.logger.info(f"Iteración {iteration}: Train({train_data.index[0]} a {train_data.index[-1]}) Test({test_data.index[0]} a {test_data.index[-1]})")
+            
+            # Entrenar modelo
+            try:
+                result = self._train_and_evaluate_period(
+                    train_data, test_data, model_class, model_params, iteration
+                )
+                results.append(result)
+                
+            except Exception as e:
+                self.logger.error(f"Error en iteración {iteration}: {e}")
+                
+            # Avanzar al siguiente período
+            current_pos += step_samples
+        
+        self.logger.info(f"Walk-Forward Validation completado: {len(results)} períodos evaluados")
+        return results
+    
+    def _train_and_evaluate_period(self, 
+                                  train_data: pd.DataFrame, 
+                                  test_data: pd.DataFrame,
+                                  model_class: Any,
+                                  model_params: Dict,
+                                  iteration: int) -> WalkForwardResult:
+        """
+        Entrenar y evaluar para un período específico.
+        """
+        # Separar features y targets
+        feature_cols = [col for col in train_data.columns if col.startswith('feature_')]
+        target_col = 'target'  # Asumiendo columna target
+        
+        X_train = train_data[feature_cols]
+        y_train = train_data[target_col]
+        X_test = test_data[feature_cols]
+        y_test = test_data[target_col]
+        
+        # Entrenar modelo
+        model = model_class(**model_params)
+        
+        # Early stopping si el modelo lo soporta
+        if hasattr(model, 'fit') and 'eval_set' in model.fit.__code__.co_varnames:
+            model.fit(X_train, y_train, 
+                     eval_set=[(X_test, y_test)],
+                     early_stopping_rounds=10,
+                     verbose=False)
+        else:
+            model.fit(X_train, y_train)
+        
+        # Hacer predicciones
+        predictions = model.predict(X_test)
+        
+        # Calcular confidence scores si es posible
+        if hasattr(model, 'predict_proba'):
+            confidence_scores = model.predict_proba(X_test)[:, 1]  # Probabilidad clase positiva
+        else:
+            confidence_scores = np.abs(predictions)  # Usar valor absoluto como proxy
+        
+        # Calcular métricas
+        performance = self._calculate_metrics(y_test, predictions, confidence_scores)
+        
+        # Detectar régimen de mercado
+        market_regime = self._detect_market_regime(test_data)
+        
+        return WalkForwardResult(
+            period_start=test_data.index[0],
+            period_end=test_data.index[-1],
+            train_size=len(X_train),
+            test_size=len(X_test),
+            model_performance=performance,
+            predictions=predictions,
+            actuals=y_test.values,
+            market_regime=market_regime,
+            confidence_scores=confidence_scores
+        )
+    
+    def _calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray, confidence: np.ndarray) -> Dict[str, float]:
+        """Calcular métricas específicas de trading."""
+        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+        
+        # Convertir a clasificación binaria si es necesario
+        if len(np.unique(y_true)) == 2:
+            y_pred_binary = (y_pred > 0.5).astype(int)
+        else:
+            y_pred_binary = (y_pred > np.median(y_pred)).astype(int)
+            y_true_binary = (y_true > np.median(y_true)).astype(int)
+            y_true = y_true_binary
+        
+        return {
+            'accuracy': accuracy_score(y_true, y_pred_binary),
+            'precision': precision_score(y_true, y_pred_binary, zero_division=0),
+            'recall': recall_score(y_true, y_pred_binary, zero_division=0),
+            'f1_score': f1_score(y_true, y_pred_binary, zero_division=0),
+            'directional_accuracy': accuracy_score(y_true > 0, y_pred > 0),
+            'avg_confidence': np.mean(confidence),
+            'std_confidence': np.std(confidence)
+        }
+    
+    def _detect_market_regime(self, data: pd.DataFrame) -> str:
+        """Detectar régimen de mercado para el período."""
+        if 'close' in data.columns:
+            returns = data['close'].pct_change().dropna()
+            volatility = returns.std()
+            avg_return = returns.mean()
+            
+            if avg_return > 0.001 and volatility < 0.03:
+                return 'bullish_stable'
+            elif avg_return > 0.001 and volatility >= 0.03:
+                return 'bullish_volatile'
+            elif avg_return < -0.001 and volatility < 0.03:
+                return 'bearish_stable'
+            elif avg_return < -0.001 and volatility >= 0.03:
+                return 'bearish_volatile'
+            else:
+                return 'sideways'
+        
+        return 'unknown'
+    
+    def analyze_results(self, results: List[WalkForwardResult]) -> Dict[str, Any]:
+        """
+        Analizar resultados de Walk-Forward Validation.
+        """
+        if not results:
+            return {}
+        
+        # Extraer métricas
+        accuracies = [r.model_performance['accuracy'] for r in results]
+        directional_accuracies = [r.model_performance['directional_accuracy'] for r in results]
+        regimes = [r.market_regime for r in results]
+        
+        # Análisis por régimen
+        regime_performance = {}
+        for regime in set(regimes):
+            regime_results = [r for r in results if r.market_regime == regime]
+            regime_accuracies = [r.model_performance['accuracy'] for r in regime_results]
+            
+            regime_performance[regime] = {
+                'count': len(regime_results),
+                'avg_accuracy': np.mean(regime_accuracies),
+                'std_accuracy': np.std(regime_accuracies),
+                'periods': [r.period_start.strftime('%Y-%m-%d') for r in regime_results]
+            }
+        
+        return {
+            'total_periods': len(results),
+            'avg_accuracy': np.mean(accuracies),
+            'std_accuracy': np.std(accuracies),
+            'min_accuracy': np.min(accuracies),
+            'max_accuracy': np.max(accuracies),
+            'avg_directional_accuracy': np.mean(directional_accuracies),
+            'regime_performance': regime_performance,
+            'stability_score': 1 - (np.std(accuracies) / np.mean(accuracies)) if np.mean(accuracies) > 0 else 0,
+            'periods_below_60pct': sum(1 for acc in accuracies if acc < 0.6),
+            'consistent_performer': sum(1 for acc in accuracies if acc > 0.65) / len(accuracies)
+        }
+```
+
+---
+
+## 🛡️ MÓDULO 3: Regularización Agresiva
+
+### Crear: `src/models/regularized_models.py`
+
+```python
+"""
+Modelos con regularización agresiva para prevenir overfitting.
+Configuración específica para trading de criptomonedas.
+"""
+
+import numpy as np
+import pandas as pd
+from typing import Dict, Any, Optional, Tuple
+import xgboost as xgb
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVC, SVR
+from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import SelectKBest, f_regression
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+import logging
+
+class RegularizedXGBoost:
+    """
+    XGBoost con regularización agresiva para trading.
+    """
+    
+    def __init__(self, task_type: str = 'momentum'):
+        """
+        Inicializar XGBoost regularizado.
+        
+        Args:
+            task_type: 'momentum', 'regime', o 'rebound'
+        """
+        self.task_type = task_type
+        self.scaler = StandardScaler()
+        self.feature_selector = SelectKBest(score_func=f_regression, k=50)
+        self.logger = logging.getLogger(__name__)
+        
+        # Parámetros anti-overfitting por tipo de tarea
+        self.params = self._get_regularized_params(task_type)
+        self.model = None
+    
+    def _get_regularized_params(self, task_type: str) -> Dict[str, Any]:
+        """Obtener parámetros específicos anti-overfitting por tarea."""
+        
+        base_params = {
+            'objective': 'reg:squarederror',
+            'eval_metric': 'rmse',
+            'n_estimators': 100,        # ⬇️ Menos árboles para reducir overfitting
+            'max_depth': 4,             # ⬇️ Árboles más simples
+            'learning_rate': 0.05,      # ⬇️ Aprendizaje lento y estable
+            'subsample': 0.7,           # 🎲 Solo 70% de datos por árbol
+            'colsample_bytree': 0.7,    # 🎲 Solo 70% de features por árbol
+            'colsample_bylevel': 0.8,   # 🎲 Feature sampling por nivel
+            'reg_alpha': 10,            # 🛡️ L1 regularization fuerte
+            'reg_lambda': 10,           # 🛡️ L2 regularization fuerte
+            'min_child_weight': 10,     # 🛡️ Mínimo peso por hoja
+            'gamma': 1,                 # 🛡️ Mínima ganancia para split
+            'random_state': 42,
+            'n_jobs': -1
+        }
+        
+        # Ajustes específicos por tarea
+        if task_type == 'momentum':
+            base_params.update({
+                'max_depth': 5,         # Momentums pueden ser más complejos
+                'n_estimators': 150,
+                'learning_rate': 0.03
+            })
+        elif task_type == 'regime':
+            base_params.update({
+                'objective': 'multi:softprob',
+                'eval_metric': 'mlogloss',
+                'max_depth': 3,         # Regímenes son más simples
+                'reg_alpha': 15,        # Regularización extra fuerte
+                'reg_lambda': 15
+            })
+        elif task_type == 'rebound':
+            base_params.update({
+                'max_depth': 3,         # Rebotes son patterns simples
+                'n_estimators': 80,
+                'learning_rate': 0.08,
+                'reg_alpha': 5,         # Menos regularización para capturar sutilezas
+                'reg_lambda': 5
+            })
+        
+        return base_params
+    
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series, 
+            X_val: Optional[pd.DataFrame] = None, y_val: Optional[pd.Series] = None):
+        """
+        Entrenar modelo con regularización y early stopping.
+        """
+        # Normalizar features
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        
+        # Selección de features para reducir dimensionalidad
+        X_train_selected = self.feature_selector.fit_transform(X_train_scaled, y_train)
+        
+        # Preparar eval_set para early stopping
+        eval_set = []
+        if X_val is not None and y_val is not None:
+            X_val_scaled = self.scaler.transform(X_val)
+            X_val_selected = self.feature_selector.transform(X_val_scaled)
+            eval_set = [(X_val_selected, y_val)]
+        
+        # Crear y entrenar modelo
+        self.model = xgb.XGBRegressor(**self.params)
+        
+        # Early stopping para prevenir overfitting
+        fit_params = {
+            'verbose': False,
+            'early_stopping_rounds': 15  # Para después de 15 iteraciones sin mejora
+        }
+        
+        if eval_set:
+            fit_params['eval_set'] = eval_set
+        
+        self.model.fit(X_train_selected, y_train, **fit_params)
+        
+        # Log de importancia de features
+        feature_importance = self.model.feature_importances_
+        selected_features = self.feature_selector.get_support()
+        
+        self.logger.info(f"Modelo {self.task_type} entrenado:")
+        self.logger.info(f"  Features seleccionadas: {np.sum(selected_features)}/{len(selected_features)}")
+        self.logger.info(f"  Early stopping en iteración: {self.model.best_iteration if hasattr(self.model, 'best_iteration') else 'N/A'}")
+        self.logger.info(f"  Score en training: {self.model.score(X_train_selected, y_train):.4f}")
+        
+        if eval_set:
+            val_score = self.model.score(X_val_selected, y_val)
+            train_score = self.model.score(X_train_selected, y_train)
+            overfitting_gap = train_score - val_score
+            
+            self.logger.info(f"  Score en validación: {val_score:.4f}")
+            self.logger.info(f"  Gap train-val: {overfitting_gap:.4f}")
+            
+            if overfitting_gap > 0.15:
+                self.logger.warning(f"⚠️  Posible overfitting detectado (gap: {overfitting_gap:.4f})")
+    
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """Hacer predicciones con el modelo entrenado."""
+        if self.model is None:
+            raise ValueError("Modelo no ha sido entrenado")
+        
+        X_scaled = self.scaler.transform(X)
+        X_selected = self.feature_selector.transform(X_scaled)
+        return self.model.predict(X_selected)
+    
+    def get_feature_importance(self) -> pd.Series:
+        """Obtener importancia de features seleccionadas."""
+        if self.model is None:
+            raise ValueError("Modelo no ha sido entrenado")
+        
+        selected_features = self.feature_selector.get_support()
+        feature_names = [f"feature_{i}" for i in range(len(selected_features)) if selected_features[i]]
+        
+        return pd.Series(self.model.feature_importances_, index=feature_names).sort_values(ascending=False)
+
+class RegularizedLSTM:
+    """
+    LSTM con regularización agresiva para rebotes y patrones temporales.
+    """
+    
+    def __init__(self, sequence_length: int = 24, task_type: str = 'rebound'):
+        """
+        Inicializar LSTM regularizado.
+        
+        Args:
+            sequence_length: Longitud de secuencia temporal
+            task_type: Tipo de tarea ('rebound', 'momentum')
+        """
+        self.sequence_length = sequence_length
+        self.task_type = task_type
+        self.scaler = StandardScaler()
+        self.model = None
+        self.logger = logging.getLogger(__name__)
+    
+    def _build_model(self, input_shape: Tuple[int, int]) -> Sequential:
+        """Construir modelo LSTM con regularización fuerte."""
+        model = Sequential([
+            # Primera capa LSTM con dropout
+            LSTM(50, return_sequences=True, input_shape=input_shape),
+            Dropout(0.3),  # 🛡️ Dropout fuerte
+            BatchNormalization(),  # 🛡️ Normalización por batch
+            
+            # Segunda capa LSTM más pequeña
+            LSTM(25, return_sequences=False),
+            Dropout(0.4),  # 🛡️ Dropout aún más fuerte
+            BatchNormalization(),
+            
+            # Capas densas con regularización
+            Dense(15, activation='relu'),
+            Dropout(0.3),
+            
+            Dense(8, activation='relu'),
+            Dropout(0.2),
+            
+            # Output layer
+            Dense(1, activation='sigmoid' if self.task_type == 'rebound' else 'linear')
+        ])
+        
+        # Optimizador con learning rate bajo
+        optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+        
+        model.compile(
+            optimizer=optimizer,
+            loss='binary_crossentropy' if self.task_type == 'rebound' else 'mse',
+            metrics=['accuracy'] if self.task_type == 'rebound' else ['mae']
+        )
+        
+        return model
+    
+    def _prepare_sequences(self, X: np.ndarray, y: Optional[np.ndarray] = None) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        """Preparar secuencias temporales para LSTM."""
+        X_sequences = []
+        y_sequences = [] if y is not None else None
+        
+        for i in range(self.sequence_length, len(X)):
+            X_sequences.append(X[i-self.sequence_length:i])
+            if y is not None:
+                y_sequences.append(y[i])
+        
+        X_sequences = np.array(X_sequences)
+        
+        if y is not None:
+            y_sequences = np.array(y_sequences)
+            return X_sequences, y_sequences
+        
+        return X_sequences, None
+    
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series,
+            X_val: Optional[pd.DataFrame] = None, y_val: Optional[pd.Series] = None,
+            epochs: int = 100):
+        """
+        Entrenar LSTM con regularización y early stopping.
+        """
+        # Normalizar datos
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        
+        # Preparar secuencias
+        X_train_seq, y_train_seq = self._prepare_sequences(X_train_scaled, y_train.values)
+        
+        # Preparar validación si está disponible
+        validation_data = None
+        if X_val is not None and y_val is not None:
+            X_val_scaled = self.scaler.transform(X_val)
+            X_val_seq, y_val_seq = self._prepare_sequences(X_val_scaled, y_val.values)
+            validation_data = (X_val_seq, y_val_seq)
+        
+        # Construir modelo
+        input_shape = (X_train_seq.shape[1], X_train_seq.shape[2])
+        self.model = self._build_model(input_shape)
+        
+        # Callbacks para regularización
+        callbacks = [
+            EarlyStopping(
+                monitor='val_loss' if validation_data else 'loss',
+                patience=15,  # 🛡️ Early stopping agresivo
+                restore_best_weights=True,
+                verbose=1
+            ),
+            ReduceLROnPlateau(
+                monitor='val_loss' if validation_data else 'loss',
+                factor=0.5,   # 🛡️ Reducir LR cuando no mejora
+                patience=8,
+                min_lr=1e-7,
+                verbose=1
+            )
+        ]
+        
+        # Entrenar modelo
+        history = self.model.fit(
+            X_train_seq, y_train_seq,
+            validation_data=validation_data,
+            epochs=epochs,
+            batch_size=32,
+            callbacks=callbacks,
+            verbose=1
+        )
+        
+        # Logging de resultados
+        final_train_loss = history.history['loss'][-1]
+        final_val_loss = history.history['val_loss'][-1] if validation_data else None
+        
+        self.logger.info(f"LSTM {self.task_type} entrenado:")
+        self.logger.info(f"  Épocas entrenadas: {len(history.history['loss'])}")
+        self.logger.info(f"  Loss final train: {final_train_loss:.4f}")
+        
+        if final_val_loss:
+            self.logger.info(f"  Loss final val: {final_val_loss:.4f}")
+            overfitting_ratio = final_train_loss / final_val_loss
+            self.logger.info(f"  Ratio train/val loss: {overfitting_ratio:.4f}")
+            
+            if overfitting_ratio < 0.7:
+                self.logger.warning(f"⚠️  Posible overfitting en LSTM (ratio: {overfitting_ratio:.4f})")
+        
+        return history
+    
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """Hacer predicciones con LSTM entrenado."""
+        if self.model is None:
+            raise ValueError("Modelo no ha sido entrenado")
+        
+        X_scaled = self.scaler.transform(X)
+        X_seq, _ = self._prepare_sequences(X_scaled)
+        
+        return self.model.predict(X_seq).flatten()
+```
+
+---
+
+## 🔍 MÓDULO 4: Detección de Overfitting
+
+### Crear: `src/validation/overfitting_detector.py`
+
+```python
+"""
+Sistema de detección automática de overfitting para modelos de trading.
+Monitorea métricas en tiempo real y alerta sobre problemas potenciales.
+"""
+
+import numpy as np
+import pandas as pd
+from typing import Dict, List, Any, Optional, Tuple
+from dataclasses import dataclass
+import logging
+from datetime import datetime, timedelta
+
+@dataclass
+class OverfittingAlert:
+    """Alerta de overfitting detectado."""
+    alert_type: str
+    severity: str  # 'warning', 'critical'
+    metric_name: str
+    current_value: float
+    threshold_value: float
+    description: str
+    recommendation: str
+    timestamp: datetime
+
+class OverfittingDetector:
+    """
+    Detector automático de overfitting con múltiples métricas.
+    Monitorea train/val gaps, performance degradation, y stability.
+    """
+    
+    def __init__(self):
+        """Inicializar detector con thresholds configurables."""
+        self.alert_thresholds = {
+            # Gaps entre training y validation
+            'train_val_accuracy_gap': 0.15,     # 15% máximo
+            'train_val_loss_ratio': 2.0,        # Loss train no debe ser 2x menor que val
+            
+            # Performance degradation
+            'validation_decline_periods': 5,     # 5 períodos consecutivos decline
+            'min_acceptable_accuracy': 0.60,     # 60% mínimo accuracy
+            'stability_threshold': 0.20,         # 20% máximo coef. variación
+            
+            # Real-world vs backtest
+            'live_backtest_gap': 0.30,          # 30% máximo gap con live trading
+            'regime_consistency': 0.50,          # 50% mínimo consistency entre regímenes
+            
+            # Feature importance drift
+            'feature_importance_drift': 0.40,    # 40% máximo cambio en importancias
+            'feature_stability_window': 10       # Ventana para medir stability
+        }
+        
+        self.performance_history = []
+        self.feature_importance_history = []
+        self.logger = logging.getLogger(__name__)
+    
+    def detect_overfitting(self, model_metrics: Dict[str, Any]) -> List[OverfittingAlert]:
+        """
+        Ejecutar detección completa de overfitting.
+        
+        Args:
+            model_metrics: Dict con métricas del modelo
+            
+        Returns:
+            Lista de alertas detectadas
+        """
+        alerts = []
+        
+        # 1. Detectar gaps train/validation
+        alerts.extend(self._detect_train_val_gaps(model_metrics))
+        
+        # 2. Detectar performance degradation
+        alerts.extend(self._detect_performance_degradation(model_metrics))
+        
+        # 3. Detectar stability issues
+        alerts.extend(self._detect_stability_issues(model_metrics))
+        
+        # 4. Detectar feature importance drift
+        alerts.extend(self._detect_feature_drift(model_metrics))
+        
+        # 5. Detectar regime inconsistency
+        alerts.extend(self._detect_regime_inconsistency(model_metrics))
+        
+        # Log resultados
+        if alerts:
+            self.logger.warning(f"🚨 {len(alerts)} alertas de overfitting detectadas")
+            for alert in alerts:
+                self.logger.warning(f"  {alert.severity.upper()}: {alert.description}")
+        else:
+            self.logger.info("✅ No se detectó overfitting")
+        
+        return alerts
+    
+    def _detect_train_val_gaps(self, metrics: Dict[str, Any]) -> List[OverfittingAlert]:
+        """Detectar gaps excesivos entre training y validation."""
+        alerts = []
+        
+        # Gap en accuracy
+        train_acc = metrics.get('train_accuracy', 0)
+        val_acc = metrics.get('val_accuracy', 0)
+        
+        if train_acc > 0 and val_acc > 0:
+            accuracy_gap = train_acc - val_acc
+            
+            if accuracy_gap > self.alert_thresholds['train_val_accuracy_gap']:
+                alerts.append(OverfittingAlert(
+                    alert_type='train_val_gap',
+                    severity='critical' if accuracy_gap > 0.25 else 'warning',
+                    metric_name='accuracy_gap',
+                    current_value=accuracy_gap,
+                    threshold_value=self.alert_thresholds['train_val_accuracy_gap'],
+                    description=f"Gap train-val accuracy: {accuracy_gap:.2%} (>{self.alert_thresholds['train_val_accuracy_gap']:.1%})",
+                    recommendation="Aplicar más regularización, reducir complejidad del modelo, o aumentar datos de entrenamiento",
+                    timestamp=datetime.now()
+                ))
+        
+        # Ratio de loss
+        train_loss = metrics.get('train_loss', float('inf'))
+        val_loss = metrics.get('val_loss', float('inf'))
+        
+        if train_loss > 0 and val_loss > 0:
+            loss_ratio = val_loss / train_loss
+            
+            if loss_ratio > self.alert_thresholds['train_val_loss_ratio']:
+                alerts.append(OverfittingAlert(
+                    alert_type='train_val_gap',
+                    severity='critical' if loss_ratio > 3.0 else 'warning',
+                    metric_name='loss_ratio',
+                    current_value=loss_ratio,
+                    threshold_value=self.alert_thresholds['train_val_loss_ratio'],
+                    description=f"Ratio val/train loss: {loss_ratio:.2f} (>{self.alert_thresholds['train_val_loss_ratio']:.1f})",
+                    recommendation="Modelo está memorizando training data. Usar dropout, regularización L1/L2, o early stopping más agresivo",
+                    timestamp=datetime.now()
+                ))
+        
+        return alerts
+    
+    def _detect_performance_degradation(self, metrics: Dict[str, Any]) -> List[OverfittingAlert]:
+        """Detectar degradación progresiva del performance."""
+        alerts = []
+        
+        # Agregar métricas actuales al historial
+        self.performance_history.append({
+            'timestamp': datetime.now(),
+            'val_accuracy': metrics.get('val_accuracy', 0),
+            'train_accuracy': metrics.get('train_accuracy', 0),
+            'directional_accuracy': metrics.get('directional_accuracy', 0)
+        })
+        
+        # Mantener solo últimos N registros
+        if len(self.performance_history) > 20:
+            self.performance_history = self.performance_history[-20:]
+        
+        # Analizar tendencia si tenemos suficiente historial
+        if len(self.performance_history) >= self.alert_thresholds['validation_decline_periods']:
+            recent_accuracies = [h['val_accuracy'] for h in self.performance_history[-5:]]
+            
+            # Detectar decline consecutivo
+            is_declining = all(recent_accuracies[i] >= recent_accuracies[i+1] 
+                             for i in range(len(recent_accuracies)-1))
+            
+            if is_declining and len(recent_accuracies) >= 3:
+                total_decline = recent_accuracies[0] - recent_accuracies[-1]
+                alerts.append(OverfittingAlert(
+                    alert_type='performance_degradation',
+                    severity='warning' if total_decline < 0.10 else 'critical',
+                    metric_name='validation_decline',
+                    current_value=total_decline,
+                    threshold_value=0.05,  # 5% decline threshold
+                    description=f"Performance declining: {total_decline:.2%} en últimos {len(recent_accuracies)} períodos",
+                    recommendation="Reentrenar modelo con datos más recientes o ajustar regularización",
+                    timestamp=datetime.now()
+                ))
+        
+        # Verificar accuracy mínimo
+        current_accuracy = metrics.get('val_accuracy', 0)
+        if current_accuracy < self.alert_thresholds['min_acceptable_accuracy']:
+            alerts.append(OverfittingAlert(
+                alert_type='performance_degradation',
+                severity='critical',
+                metric_name='low_accuracy',
+                current_value=current_accuracy,
+                threshold_value=self.alert_thresholds['min_acceptable_accuracy'],
+                description=f"Accuracy muy bajo: {current_accuracy:.2%} (<{self.alert_thresholds['min_acceptable_accuracy']:.1%})",
+                recommendation="Revisar calidad de datos, features, y arquitectura del modelo",
+                timestamp=datetime.now()
+            ))
+        
+        return alerts
+    
+    def _detect_stability_issues(self, metrics: Dict[str, Any]) -> List[OverfittingAlert]:
+        """Detectar problemas de estabilidad en predicciones."""
+        alerts = []
+        
+        # Analizar estabilidad de accuracy si tenemos historial
+        if len(self.performance_history) >= 5:
+            recent_accuracies = [h['val_accuracy'] for h in self.performance_history[-10:]]
+            
+            if len(recent_accuracies) > 1:
+                accuracy_mean = np.mean(recent_accuracies)
+                accuracy_std = np.std(recent_accuracies)
+                
+                # Coeficiente de variación como medida de estabilidad
+                coef_variation = accuracy_std / accuracy_mean if accuracy_mean > 0 else float('inf')
+                
+                if coef_variation > self.alert_thresholds['stability_threshold']:
+                    alerts.append(OverfittingAlert(
+                        alert_type='stability_issue',
+                        severity='warning',
+                        metric_name='accuracy_instability',
+                        current_value=coef_variation,
+                        threshold_value=self.alert_thresholds['stability_threshold'],
+                        description=f"Performance inestable: CV={coef_variation:.2%} (>{self.alert_thresholds['stability_threshold']:.1%})",
+                        recommendation="Usar ensemble de modelos o aumentar regularización para mayor estabilidad",
+                        timestamp=datetime.now()
+                    ))
+        
+        return alerts
+    
+    def _detect_feature_drift(self, metrics: Dict[str, Any]) -> List[OverfittingAlert]:
+        """Detectar drift en importancia de features."""
+        alerts = []
+        
+        current_importance = metrics.get('feature_importance', {})
+        if current_importance:
+            # Agregar al historial
+            self.feature_importance_history.append({
+                'timestamp': datetime.now(),
+                'importance': current_importance.copy()
+            })
+            
+            # Mantener ventana de historial
+            window_size = self.alert_thresholds['feature_stability_window']
+            if len(self.feature_importance_history) > window_size:
+                self.feature_importance_history = self.feature_importance_history[-window_size:]
+            
+            # Analizar drift si tenemos suficiente historial
+            if len(self.feature_importance_history) >= 3:
+                first_importance = self.feature_importance_history[0]['importance']
+                
+                # Calcular drift para features comunes
+                common_features = set(first_importance.keys()) & set(current_importance.keys())
+                
+                if common_features:
+                    drifts = []
+                    for feature in common_features:
+                        old_val = first_importance[feature]
+                        new_val = current_importance[feature]
+                        
+                        if old_val > 0:  # Evitar división por cero
+                            drift = abs(new_val - old_val) / old_val
+                            drifts.append(drift)
+                    
+                    if drifts:
+                        avg_drift = np.mean(drifts)
+                        max_drift = np.max(drifts)
+                        
+                        if avg_drift > self.alert_thresholds['feature_importance_drift']:
+                            alerts.append(OverfittingAlert(
+                                alert_type='feature_drift',
+                                severity='warning' if avg_drift < 0.6 else 'critical',
+                                metric_name='feature_importance_drift',
+                                current_value=avg_drift,
+                                threshold_value=self.alert_thresholds['feature_importance_drift'],
+                                description=f"Drift en feature importance: {avg_drift:.2%} promedio, {max_drift:.2%} máximo",
+                                recommendation="Revisar si cambió el régimen de mercado o calidad de datos",
+                                timestamp=datetime.now()
+                            ))
+        
+        return alerts
+    
+    def _detect_regime_inconsistency(self, metrics: Dict[str, Any]) -> List[OverfittingAlert]:
+        """Detectar inconsistencias entre regímenes de mercado."""
+        alerts = []
+        
+        regime_performance = metrics.get('regime_performance', {})
+        
+        if len(regime_performance) >= 2:
+            accuracies = [perf.get('avg_accuracy', 0) for perf in regime_performance.values()]
+            
+            if accuracies:
+                min_accuracy = min(accuracies)
+                max_accuracy = max(accuracies)
+                accuracy_range = max_accuracy - min_accuracy
+                
+                # Si hay mucha variación entre regímenes, puede indicar overfitting a regímenes específicos
+                if accuracy_range > 0.30:  # 30% diferencia entre regímenes
+                    worst_regime = min(regime_performance.items(), key=lambda x: x[1].get('avg_accuracy', 0))
+                    best_regime = max(regime_performance.items(), key=lambda x: x[1].get('avg_accuracy', 0))
+                    
+                    alerts.append(OverfittingAlert(
+                        alert_type='regime_inconsistency',
+                        severity='warning',
+                        metric_name='regime_performance_gap',
+                        current_value=accuracy_range,
+                        threshold_value=0.30,
+                        description=f"Gran variación entre regímenes: {worst_regime[0]} ({worst_regime[1].get('avg_accuracy', 0):.1%}) vs {best_regime[0]} ({best_regime[1].get('avg_accuracy', 0):.1%})",
+                        recommendation="Modelo puede estar overfitted a regímenes específicos. Considerar balancear datos por régimen",
+                        timestamp=datetime.now()
+                    ))
+        
+        return alerts
+    
+    def generate_overfitting_report(self, alerts: List[OverfittingAlert]) -> str:
+        """Generar reporte legible de overfitting."""
+        if not alerts:
+            return "✅ **OVERFITTING REPORT: MODELO SALUDABLE**\n\nNo se detectaron problemas de overfitting."
+        
+        report = f"🚨 **OVERFITTING REPORT: {len(alerts)} ALERTAS DETECTADAS**\n\n"
+        
+        # Agrupar por severidad
+        critical_alerts = [a for a in alerts if a.severity == 'critical']
+        warning_alerts = [a for a in alerts if a.severity == 'warning']
+        
+        if critical_alerts:
+            report += "🔴 **ALERTAS CRÍTICAS:**\n"
+            for alert in critical_alerts:
+                report += f"- {alert.description}\n"
+                report += f"  💡 Recomendación: {alert.recommendation}\n\n"
+        
+        if warning_alerts:
+            report += "🟡 **ALERTAS DE ADVERTENCIA:**\n"
+            for alert in warning_alerts:
+                report += f"- {alert.description}\n"
+                report += f"  💡 Recomendación: {alert.recommendation}\n\n"
+        
+        # Recomendaciones generales
+        report += "🔧 **ACCIONES RECOMENDADAS:**\n"
+        
+        if any(a.alert_type == 'train_val_gap' for a in alerts):
+            report += "1. Aumentar regularización (L1/L2, dropout)\n"
+            report += "2. Reducir complejidad del modelo\n"
+            report += "3. Implementar early stopping más agresivo\n"
+        
+        if any(a.alert_type == 'performance_degradation' for a in alerts):
+            report += "4. Reentrenar con datos más recientes\n"
+            report += "5. Revisar calidad de features\n"
+        
+        if any(a.alert_type == 'stability_issue' for a in alerts):
+            report += "6. Usar ensemble de modelos\n"
+            report += "7. Aumentar tamaño de dataset de validación\n"
+        
+        report += "\n⚠️ **IMPORTANTE**: Overfitting en trading puede causar pérdidas reales. Resolver antes de usar en live trading."
+        
+        return report
+    
+    def should_retrain_model(self, alerts: List[OverfittingAlert]) -> Tuple[bool, str]:
+        """
+        Determinar si el modelo necesita reentrenamiento basado en alertas.
+        
+        Returns:
+            (should_retrain, reason)
+        """
+        critical_count = sum(1 for a in alerts if a.severity == 'critical')
+        
+        # Criterios para reentrenamiento obligatorio
+        if critical_count >= 2:
+            return True, "Múltiples alertas críticas de overfitting"
+        
+        # Buscar alertas específicas que requieren reentrenamiento
+        for alert in alerts:
+            if alert.alert_type == 'performance_degradation' and alert.severity == 'critical':
+                return True, "Performance crítico - modelo no confiable"
+            
+            if alert.alert_type == 'train_val_gap' and alert.current_value > 0.25:
+                return True, "Gap train-val extremo - overfitting severo"
+        
+        # Advertencias que sugieren reentrenamiento
+        warning_count = sum(1 for a in alerts if a.severity == 'warning')
+        if warning_count >= 3:
+            return True, "Múltiples advertencias - reentrenamiento preventivo"
+        
+        return False, "Modelo estable"
+```
+
+---
+
+## 📊 MÓDULO 5: Configuración Actualizada
+
+### Actualizar: `config/training_config.yaml`
+
+```yaml
+# NvBot3 - Configuración Anti-Overfitting y 30 Monedas Estratégicas
+
+# =============================================================================
+# SELECCIÓN ESTRATÉGICA DE 30 MONEDAS
+# =============================================================================
+data:
+  # 30 monedas organizadas por tiers estratégicos
+  symbols:
+    # Tier 1: Blue Chips (10 monedas) - Base estable del portfolio
+    tier_1: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT', 
+             'XRPUSDT', 'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'AVAXUSDT']
+    
+    # Tier 2: Strong Alts (10 monedas) - DeFi y protocolos establecidos
+    tier_2: ['UNIUSDT', 'AAVEUSDT', 'MKRUSDT', 'SUSHIUSDT', 'COMPUSDT',
+             'YFIUSDT', 'SNXUSDT', 'CRVUSDT', '1INCHUSDT', 'ALPHAUSDT']
+    
+    # Tier 3: Emerging Sectors (10 monedas) - Diversificación sectorial
+    tier_3: ['SANDUSDT', 'MANAUSDT', 'ENJUSDT', 'CHZUSDT', 'BATUSDT',
+             'ZRXUSDT', 'STORJUSDT', 'OCEANUSDT', 'FETUSDT', 'IOTAUSDT']
+  
+  # Combinar todos los tiers en una lista plana
+  all_symbols: [] # Se poblará automáticamente con tier_1 + tier_2 + tier_3
+  
+  timeframes: ['5m', '15m', '1h', '4h', '1d']
+  start_date: '2022-01-01'
+  lookback_periods: 200
+
+# =============================================================================
+# CONFIGURACIÓN ANTI-OVERFITTING
+# =============================================================================
+anti_overfitting:
+  # Validación temporal estricta
+  validation:
+    method: "temporal_split"        # NUNCA usar random split
+    train_ratio: 0.70              # 70% datos más antiguos
+    val_ratio: 0.15                # 15% datos intermedios  
+    test_ratio: 0.15               # 15% datos más recientes
+    min_samples_per_split: 1000    # Mínimo samples por split
+    
+    # Walk-forward validation
+    walk_forward:
+      enabled: true
+      initial_train_months: 6      # 6 meses iniciales
+      test_months: 1               # 1 mes por período test
+      retrain_frequency_months: 1  # Reentrenar cada mes
+      min_train_samples: 5000      # Mínimo para entrenar
+  
+  # Cross-validation temporal
+  cross_validation:
+    method: "TimeSeriesSplit"
+    n_splits: 5
+    test_size_months: 2
+  
+  # Thresholds para detección de overfitting
+  detection_thresholds:
+    max_train_val_accuracy_gap: 0.15    # 15% máximo gap
+    max_train_val_loss_ratio: 2.0       # Loss ratio máximo
+    min_acceptable_accuracy: 0.60       # 60% mínimo accuracy
+    stability_threshold: 0.20           # 20% máximo coef. variación
+    live_backtest_gap: 0.30             # 30% máximo gap live vs backtest
+    
+  # Auto-reentrenamiento
+  auto_retrain:
+    enabled: true
+    trigger_conditions:
+      critical_alerts_threshold: 2      # 2+ alertas críticas
+      accuracy_drop_threshold: 0.10     # 10% drop en accuracy
+      consecutive_poor_periods: 3       # 3 períodos malos consecutivos
+    
+    retrain_schedule:
+      max_frequency_days: 7              # Máximo cada 7 días
+      min_frequency_days: 30             # Mínimo cada 30 días
+
+# =============================================================================
+# MODELOS CON REGULARIZACIÓN AGRESIVA
+# =============================================================================
+models:
+  # Detector de Momentum (≥5%)
+  momentum:
+    algorithm: "regularized_xgboost"
+    params:
+      n_estimators: 150              # Aumentado para momentum complexity
+      max_depth: 5                   # Profundidad moderada
+      learning_rate: 0.03            # Learning rate conservador
+      subsample: 0.7                 # 70% sampling por árbol
+      colsample_bytree: 0.7          # 70% features por árbol
+      reg_alpha: 10                  # L1 regularization fuerte
+      reg_lambda: 10                 # L2 regularization fuerte
+      min_child_weight: 10           # Mínimo weight por hoja
+      gamma: 1                       # Mínima ganancia para split
+    
+    early_stopping_rounds: 15         # Para después de 15 sin mejora
+    feature_selection:
+      enabled: true
+      max_features: 50               # Máximo 50 features
+      selection_method: "f_regression"
+  
+  # Clasificador de Regímenes
+  regime:
+    algorithm: "regularized_xgboost"  
+    params:
+      objective: "multi:softprob"
+      n_estimators: 100              # Menos árboles para regímenes
+      max_depth: 3                   # Más simple para regímenes
+      learning_rate: 0.05
+      subsample: 0.8
+      colsample_bytree: 0.8
+      reg_alpha: 15                  # Regularización extra fuerte
+      reg_lambda: 15
+      min_child_weight: 15
+      gamma: 2
+    
+    early_stopping_rounds: 20
+    feature_selection:
+      max_features: 30               # Menos features para regímenes
+  
+  # Predictor de Rebotes (1-3%)
+  rebound:
+    algorithm: "regularized_lstm"
+    params:
+      sequence_length: 24            # 24 períodos de lookback
+      lstm_units_layer1: 50
+      lstm_units_layer2: 25
+      dropout_rate: 0.4              # Dropout fuerte
+      batch_normalization: true
+      learning_rate: 0.001
+      batch_size: 32
+      epochs: 100
+    
+    early_stopping:
+      enabled: true
+      patience: 15                   # Para después de 15 épocas sin mejora
+      monitor: "val_loss"
+    
+    callbacks:
+      reduce_lr_on_plateau:
+        enabled: true
+        factor: 0.5                  # Reducir LR a la mitad
+        patience: 8
+        min_lr: 0.0000001
+
+# =============================================================================
+# FEATURE ENGINEERING ANTI-OVERFITTING
+# =============================================================================
+features:
+  # Normalización obligatoria
+  normalization:
+    enabled: true
+    method: "standard_scaler"        # StandardScaler para consistency
+    per_symbol: true                 # Normalizar por símbolo
+  
+  # Selección de features robustas
+  selection:
+    remove_regime_specific: true     # Quitar features específicos de régimen
+    correlation_threshold: 0.95      # Quitar features correlacionadas >95%
+    stability_window: 30             # Ventana para medir stability
+    min_importance_threshold: 0.01   # Mínima importancia para incluir
+  
+  # Features técnicos robustos
+  technical_indicators:
+    # Momentum indicators (robustos a diferentes mercados)
+    rsi_periods: [7, 14, 21]
+    macd_config: [12, 26, 9]
+    roc_periods: [5, 10, 20]
+    
+    # Volatility indicators
+    atr_period: 14
+    bollinger_bands: [20, 2]
+    
+    # Volume indicators  
+    obv_enabled: true
+    volume_sma_period: 20
+    
+    # Trend indicators
+    adx_period: 14
+    sma_periods: [5, 10, 20, 50]
+    ema_periods: [12, 26, 50]
+
+# =============================================================================
+# MONITOREO Y ALERTAS
+# =============================================================================
+monitoring:
+  # Logging detallado
+  logging:
+    level: "INFO"
+    overfitting_alerts: true
+    performance_tracking: true
+    feature_drift_monitoring: true
+  
+  # Métricas de performance
+  metrics:
+    # Métricas principales
+    primary: ["accuracy", "precision", "recall", "f1_score"]
+    
+    # Métricas específicas de trading
+    trading_specific: ["directional_accuracy", "sharpe_ratio", "max_drawdown"]
+    
+    # Métricas de estabilidad
+    stability: ["coefficient_variation", "regime_consistency"]
+  
+  # Reportes automáticos
+  reporting:
+    overfitting_report_frequency: "daily"
+    performance_summary_frequency: "weekly"
+    model_health_check_frequency: "daily"
+
+# =============================================================================
+# CONFIGURACIÓN DE ENTRENAMIENTO
+# =============================================================================
+training:
+  # Recursos de hardware (optimizado para laptop)
+  hardware:
+    max_threads: 4                   # Máximo 4 threads para laptop
+    max_processes: 2                 # Máximo 2 procesos
+    memory_limit_gb: 8               # Límite de memoria
+    batch_processing: true           # Procesar en lotes
+  
+  # Pipeline de entrenamiento
+  pipeline:
+    data_validation: true            # Validar datos antes de entrenar
+    feature_engineering: true       # Calcular features automáticamente
+    model_selection: true           # Seleccionar mejor modelo
+    overfitting_detection: true     # Detectar overfitting automáticamente
+    
+  # Gestión de modelos
+  model_management:
+    save_best_only: true            # Solo guardar mejores modelos
+    version_control: true           # Versionar modelos
+    backup_frequency: "weekly"      # Backup semanal
+    max_model_versions: 5           # Mantener últimas 5 versiones
+
+# =============================================================================
+# API Y EXTERNAL SERVICES
+# =============================================================================
+api:
+  binance:
+    rate_limit_per_minute: 1200     # Respetar límites Binance
+    chunk_size_days: 30
+    max_retries: 3
+    retry_delay: 1
+    backoff_factor: 2
+    
+    # Configuración para 30 símbolos
+    concurrent_downloads: 5          # Máximo 5 descargas simultáneas
+    symbols_per_batch: 10           # Procesar 10 símbolos por lote
+
+# =============================================================================
+# CONFIGURACIÓN DE PRODUCCIÓN
+# =============================================================================
+production:
+  # Configuración para live trading (cuando esté listo)
+  live_trading:
+    enabled: false                   # Inicialmente disabled
+    paper_trading_first: true       # Siempre probar en paper primero
+    min_confidence_threshold: 0.75  # 75% mínimo confianza para signal
+    max_position_size: 0.02         # 2% máximo por posición
+    
+  # Seguridad
+  safety:
+    max_daily_trades: 10            # Máximo 10 trades por día
+    emergency_stop_loss: 0.05       # 5% stop loss de emergencia
+    model_health_required: true     # Modelo debe estar saludable
+```
+
+---
+
+## 🚀 INSTRUCCIONES DE IMPLEMENTACIÓN PARA EL AGENTE
+
+### TAREA 1: Actualizar Configuración
+```bash
+# 1. Reemplazar completamente config/training_config.yaml con la nueva configuración
+# 2. Verificar que todos los paths y parámetros son correctos
+# 3. Crear backup de configuración anterior si existe
+```
+
+### TAREA 2: Implementar Módulos Anti-Overfitting
+```bash
+# Crear estructura de directorios:
+mkdir -p src/validation
+mkdir -p src/models
+
+# Implementar módulos en este orden:
+# 1. src/validation/temporal_validator.py
+# 2. src/validation/walk_forward_validator.py  
+# 3. src/models/regularized_models.py
+# 4. src/validation/overfitting_detector.py
+```
+
+### TAREA 3: Integrar con Pipeline Existente
+```bash
+# Modificar scripts existentes para usar:
+# 1. Validación temporal en lugar de random splits
+# 2. Modelos regularizados en lugar de modelos básicos
+# 3. Detección automática de overfitting
+# 4. Las 30 monedas estratégicas
+```
+
+### TAREA 4: Testing y Validación
+```bash
+# Crear tests para verificar:
+# 1. Que no hay data leakage temporal
+# 2. Que la regularización funciona correctamente
+# 3. Que la detección de overfitting es efectiva
+# 4. Que las 30 monedas se procesan correctamente
+```
+
+---
+
+## ⚠️ NOTAS CRÍTICAS PARA EL AGENTE
+
+1. **NUNCA usar random splits** - Siempre usar splits temporales
+2. **SIEMPRE verificar** que train < val < test temporalmente
+3. **Implementar early stopping** en todos los modelos
+4. **Monitorear train/val gaps** en cada entrenamiento
+5. **Usar regularización agresiva** - es mejor subajuste que sobreajuste
+6. **Validar con walk-forward** antes de considerar modelo listo
+7. **Las 30 monedas son estratégicas** - no cambiar sin justificación
+8. **Logging detallado** para detectar problemas temprano
+
+---
+
+## 🎯 OBJETIVOS DE ÉXITO
+
+Al completar esta implementación, NvBot3 tendrá:
+- ✅ Sistema robusto que funciona en diferentes condiciones de mercado
+- ✅ Prevención automática de overfitting
+- ✅ Selección estratégica de 30 monedas diversificadas
+- ✅ Validación temporal estricta
+- ✅ Detección automática de problemas
+- ✅ Modelos regularizados que generalizan bien
+- ✅ Pipeline de reentrenamiento inteligente
+
+**RESULTADO ESPERADO**: Un bot que mantiene performance consistente en live trading, no solo en backtesting.

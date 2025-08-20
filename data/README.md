@@ -14,7 +14,8 @@ data/
 
 Los archivos de datos **NO están incluidos en el repositorio Git** por las siguientes razones:
 
-### 🚫 Por qué NO subimos los datos:
+### 🚫 Por qué NO subimos los datos
+
 - **Tamaño**: Los archivos pueden ser de varios GB (ej: 45k registros = ~6MB cada uno)
 - **Regenerable**: Los datos se pueden descargar nuevamente usando los scripts
 - **Actualización**: Los datos cambian constantemente (nuevos datos cada día)
@@ -24,6 +25,7 @@ Los archivos de datos **NO están incluidos en el repositorio Git** por las sigu
 ## 🔄 **Cómo regenerar los datos**
 
 ### 1. Configurar claves API
+
 ```bash
 # Copia el archivo de ejemplo
 cp .env.example .env
@@ -34,6 +36,7 @@ cp .env.example .env
 ```
 
 ### 2. Descargar datos históricos
+
 ```bash
 # Activar entorno virtual
 nvbot3_env\Scripts\activate  # Windows
@@ -50,21 +53,24 @@ python scripts/download_historical_data.py --validate-only
 
 ## 📈 **Datos Disponibles**
 
-### Símbolos configurados:
+### Símbolos configurados
+
 - **BTCUSDT** - Bitcoin/Tether
 - **ETHUSDT** - Ethereum/Tether  
 - **BNBUSDT** - Binance Coin/Tether
 - **ADAUSDT** - Cardano/Tether
 - **SOLUSDT** - Solana/Tether
 
-### Timeframes disponibles:
+### Timeframes disponibles
+
 - **5m** - 5 minutos (~240k registros, ~30MB)
 - **15m** - 15 minutos (~80k registros, ~10MB)
 - **1h** - 1 hora (~32k registros, ~4MB)
 - **4h** - 4 horas (~8k registros, ~1MB)
 - **1d** - 1 día (~1.3k registros, ~200KB)
 
-### Período de datos:
+### Período de datos
+
 - **Desde**: 1 enero 2022
 - **Hasta**: Presente (se actualiza automáticamente)
 - **Total**: ~3.5+ años de datos históricos
@@ -72,6 +78,7 @@ python scripts/download_historical_data.py --validate-only
 ## 📊 **Formato de Datos**
 
 Cada archivo CSV contiene las siguientes columnas:
+
 ```
 timestamp                    - Marca de tiempo
 open                        - Precio de apertura
@@ -122,14 +129,17 @@ print(f"Período: {df.index.min()} a {df.index.max()}")
 ## 🛠️ **Troubleshooting**
 
 ### Error "Claves API no configuradas"
+
 - Verifica que `.env` existe y tiene las claves correctas
 - Asegúrate de estar en el directorio raíz del proyecto
 
 ### Error "Rate limit exceeded"
+
 - Los scripts incluyen rate limiting automático
 - Espera unos minutos y vuelve a intentar
 
 ### Archivos corruptos o incompletos
+
 ```bash
 # Re-descargar archivo específico
 python scripts/download_historical_data.py --symbol BTCUSDT --timeframe 5m --force

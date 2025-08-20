@@ -1,0 +1,50 @@
+data:
+  symbols: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT']
+  timeframes: ['5m', '15m', '1h', '4h', '1d']
+  start_date: '2022-01-01'
+  lookback_periods: 200
+
+models:
+  momentum:
+    xgb_params:
+      n_estimators: 200
+      max_depth: 8
+      learning_rate: 0.1
+      subsample: 0.8
+    rf_params:
+      n_estimators: 100
+      max_depth: 10
+      min_samples_split: 5
+
+  regime:
+    svm_params:
+      C: 1.0
+      kernel: 'rbf'
+      gamma: 'scale'
+
+  rebound:
+    lstm_params:
+      sequence_length: 24
+      lstm_units: 50
+      dropout: 0.2
+      epochs: 100
+
+validation:
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  cv_folds: 5
+  walk_forward_periods: 6
+
+api:
+  binance:
+    rate_limit_per_minute: 1200
+    chunk_size_days: 30
+    max_retries: 3
+    retry_delay: 1
+    backoff_factor: 2
+
+download:
+  max_gap_multiplier: 2
+  memory_chunk_size: 1000
+  progress_update_interval: 100
