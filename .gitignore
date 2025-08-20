@@ -1,0 +1,188 @@
+# ===========================
+# NvBot3 - Archivo .gitignore
+# ===========================
+
+# ========================
+# ENTORNOS VIRTUALES
+# ========================
+nvbot3_env/
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# ========================
+# ARCHIVOS SENSIBLES
+# ========================
+# Variables de entorno y configuración sensible
+.env
+.env.local
+.env.production
+.env.development
+.env.test
+*.env
+
+# Claves API y credenciales
+config/api_keys.yaml
+config/credentials.json
+config/secrets.yaml
+api_keys.txt
+credentials.txt
+secrets.txt
+
+# ========================
+# DATOS SENSIBLES
+# ========================
+# Datos de trading reales
+data/live/
+data/accounts/
+data/api_responses/
+data/private/
+
+# Archivos de trading con datos reales
+*_live_data.csv
+*_account_data.json
+*_balance_history.csv
+*_trading_history.json
+
+# ========================
+# ARCHIVOS TEMPORALES
+# ========================
+# Logs
+logs/
+*.log
+log/
+
+# Cache de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribución / empaquetado
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# ========================
+# JUPYTER NOTEBOOKS
+# ========================
+# Checkpoints de Jupyter
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# ========================
+# MODELOS Y DATOS GRANDES
+# ========================
+# Modelos entrenados (pueden ser muy grandes)
+models/*.pkl
+models/*.joblib
+models/*.h5
+models/*.pb
+models/*.onnx
+models/large_models/
+
+# Datasets grandes
+data/raw/large_datasets/
+data/processed/full_datasets/
+*.parquet
+*.hdf5
+
+# ========================
+# CONFIGURACIÓN DE IDEs
+# ========================
+# VSCode
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+.vscode/c_cpp_properties.json
+
+# PyCharm
+.idea/
+
+# Spyder
+.spyderproject
+.spyproject
+
+# ========================
+# SISTEMA OPERATIVO
+# ========================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# ========================
+# ESPECÍFICO DEL PROYECTO
+# ========================
+# Datos de respaldo temporales
+backups/
+temp/
+tmp/
+
+# Resultados de backtesting con datos sensibles
+results/live_trading/
+results/real_accounts/
+
+# Configuraciones locales específicas del desarrollador
+config/local_config.yaml
+config/dev_override.yaml
+
+# Archivos de debugging
+debug_output/
+*.debug
+
+# ========================
+# DOCUMENTACIÓN TEMPORAL
+# ========================
+# Documentos de trabajo personal
+docs/personal/
+notes/
+draft/
