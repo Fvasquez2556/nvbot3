@@ -1,0 +1,225 @@
+# 🎯 Plan para Preparar NvBot3 para Entrenamiento
+
+## 📅 ** Data Validator (CRÍTICO)**
+
+### **Objetivo:** Asegurar calidad de datos para entrenamiento confiable
+
+### **Tareas:**
+1. **Crear `src/data/data_validator.py`**
+   - Validar completeness (sin gaps > 2 períodos)
+   - Verificar price validity (no cambios > 50%)
+   - Comprobar volume validity (> 0 en 95%+ registros)
+   - Detectar outliers extremos
+   - Verificar consistencia temporal
+
+2. **Validar datos descargados**
+   ```bash
+   python scripts/validate_downloaded_data.py --symbol BTCUSDT --timeframe 5m
+   python scripts/validate_downloaded_data.py --all-symbols
+   ```
+
+3. **Corregir problemas detectados**
+   - Forward fill para gaps pequeños
+   - Interpolación para outliers menores
+   - Remover datos corruptos irrecuperables
+
+### **Resultado esperado:**
+- ✅ Datos limpios y consistentes
+- ✅ Reporte de calidad por símbolo/timeframe
+- ✅ Datasets listos para feature engineering
+
+---
+
+## 📅 ** Feature Calculator**
+
+### **Objetivo:** Calcular ~50 indicadores técnicos específicos
+
+### **Tareas:**
+1. **Crear `src/data/feature_calculator.py`**
+
+2. **Implementar grupos de features:**
+
+   **🔥 Para Momentum Alcista (≥5%):**
+   ```python
+   # Indicadores primarios
+   - ROC(14) - Rate of Change
+   - ADX(14) - Average Directional Index  
+   - MACD(12,26,9) - Moving Average Convergence Divergence
+   
+   # Indicadores secundarios
+   - RSI(14) - Relative Strength Index
+   - OBV - On-Balance Volume
+   - Bollinger Bands (20,2)
+   ```
+
+   **⚡ Para Rebotes (1-3%):**
+   ```python
+   - RSI(14) para condiciones oversold
+   - MACD Histogram para divergencias
+   - Volume patterns (sudden spikes)
+   - Support/Resistance levels
+   ```
+
+   **📊 Para Régimen de Mercado:**
+   ```python
+   - ATR(14) - Average True Range
+   - Bollinger Bands Width (≤0.20 = consolidación)
+   - ADX (< 20 = sideways, > 25 = trending)
+   - Moving Average slopes (SMA 20,50,200)
+   ```
+
+3. **Validar features calculadas**
+   ```bash
+   python scripts/calculate_features.py --symbol BTCUSDT --timeframe 5m
+   python scripts/validate_features.py --check-correlations
+   ```
+
+### **Resultado esperado:**
+- ✅ 50+ indicadores técnicos calculados
+- ✅ Features específicas para cada objetivo
+- ✅ Datasets enriquecidos listos para targets
+
+---
+
+## 📅 ** Target Creator**
+
+### **Objetivo:** Definir exactamente qué debe predecir cada modelo
+
+### **Tareas:**
+1. **Crear `src/data/target_creator.py`**
+
+2. **Implementar targets específicos:**
+
+   **🎯 Momentum Target:**
+   ```python
+   def create_momentum_target(close_prices, lookforward_periods=48):
+       # Buscar máximo precio en próximos 48 períodos (4 horas en 5m)
+       # Target = 1 si (max_future_price / current_price) >= 1.05
+       # Target = 0 en caso contrario
+       # Distribución esperada: ~15-20% positivos
+   ```
+
+   **🎯 Rebound Target:**
+   ```python
+   def create_rebound_target(close_prices, lookforward_periods=24):
+       # Buscar rebote de 1-3% en próximos 24 períodos (2 horas en 5m)
+       # Target = 1 si rebote está en rango 1%-3%
+       # Target = 0 si rebote < 1% o > 3%
+       # Distribución esperada: ~10-15% positivos
+   ```
+
+   **🎯 Regime Target:**
+   ```python
+   def create_regime_target(prices, periods=96):
+       # Analizar tendencia en próximos 96 períodos (8 horas en 5m)
+       # 0 = Bearish (tendencia bajista)
+       # 1 = Sideways (consolidación)  
+       # 2 = Bullish (tendencia alcista)
+       # Distribución esperada: 30/40/30%
+   ```
+
+3. **Validar distribución de targets**
+   ```bash
+   python scripts/create_targets.py --symbol BTCUSDT --timeframe 5m
+   python scripts/analyze_target_distribution.py --all-targets
+   ```
+
+### **Resultado esperado:**
+- ✅ 3 tipos de targets bien definidos
+- ✅ Distribución balanceada (no 99% negativos)
+- ✅ Datasets completos listos para entrenamiento
+
+---
+
+## 📅 ** Model Trainer**
+
+### **Objetivo:** Pipeline completo de entrenamiento con anti-overfitting
+
+### **Tareas:**
+1. **Crear `scripts/train_models.py`**
+   - Entrenar 3 modelos especializados
+   - Aplicar walk-forward validation
+   - Detectar overfitting automáticamente
+
+2. **Entrenar modelos específicos:**
+   ```python
+   # Momentum Detector (XGBoost + RandomForest ensemble)
+   python scripts/train_models.py --model momentum --symbol BTCUSDT
+   
+   # Rebound Predictor (LSTM temporal)
+   python scripts/train_models.py --model rebound --symbol ETHUSDT
+   
+   # Regime Classifier (SVM multiclass)
+   python scripts/train_models.py --model regime --symbol BNBUSDT
+   ```
+
+3. **Validación exhaustiva:**
+   ```bash
+   python scripts/validate_trained_models.py --test-period 6months
+   python scripts/backtest_signals.py --start-date 2024-01-01
+   ```
+
+### **Resultado esperado:**
+- ✅ 3 modelos entrenados y validados
+- ✅ Performance > 75% en momentum detection
+- ✅ Sistema completo listo para señales reales
+
+---
+
+## 🎯 **OBJETIVOS DE PERFORMANCE FINALES**
+
+### **Momentum Alcista (≥5%):**
+- **Precisión:** >75% 
+- **Recall:** >60%
+- **False positives:** <20%
+
+### **Rebotes (1-3%):**
+- **Precisión:** >70%
+- **Timing:** Detectar en primeras 2 horas
+- **Risk/Reward:** >1:2
+
+### **Régimen de Mercado:**
+- **Accuracy multiclass:** >65%
+- **Detección de cambios:** <4 horas delay
+- **Consistency:** >80% en diferentes timeframes
+
+---
+
+## ⚠️ **CONSIDERACIONES CRÍTICAS**
+
+### **🛡️ Anti-overfitting obligatorio:**
+- Walk-forward validation en cada paso
+- Regularización agresiva en todos los modelos
+- Validation temporal estricta (nunca random splits)
+
+### **💻 Optimización para laptop:**
+- Máximo 4 threads simultáneos
+- Procesamiento en lotes para memoria
+- Cache inteligente de features calculadas
+
+### **📊 Calidad de señales:**
+- Mejor 5 señales precisas que 50 imprecisas
+- Clasificación de confianza: baja/media/alta
+- Señales manuales (humano toma decisión final)
+
+### **🔄 Reentrenamiento automático:**
+- Reentrenar cada 2 semanas con nuevos datos
+- Detectar degradación de performance
+- Alertas automáticas cuando precisión < 65%
+
+---
+
+## 🚀 **CRONOGRAMA RESUMIDO**
+
+	      Componente     | Estado Actual    | Objetivo                |
+|-------|--------------------|------------------|-------------------------|
+| **1** | Data Validator     | ❌ No existe    | ✅ Datos validados     |
+| **2** | Feature Calculator | ❌ No existe    | ✅ 50+ features        |
+| **3** | Target Creator     | ❌ No existe    | ✅ 3 targets definidos |
+| **4** | Model Trainer      | ⚠️ Base parcial | ✅ Modelos entrenados  |
+
+### **🎯 Meta Final:**
+- Detectar momentums alcistas ≥5% con >75% precisión
+- Predecir rebotes 1-3% con timing preciso
+- Clasificar régimen de mercado en tiempo real
+- Generar señales manuales confiables para trading
