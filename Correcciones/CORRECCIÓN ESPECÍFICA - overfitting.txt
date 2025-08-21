@@ -1,0 +1,177 @@
+# 🔧 CORRECCIÓN ESPECÍFICA - overfitting_detector.py
+# Método detect() línea 80-200
+
+def detect(self, model, X_train: np.ndarray, y_train: np.ndarray,
+           X_val: np.ndarray, y_val: np.ndarray,
+           model_name: str = "Unknown") -> OverfittingReport:
+    """
+    Detectar overfitting en modelo entrenado.
+    CORRECCIÓN: Manejo seguro de arrays vs DataFrames.
+    """
+    warnings_list = []
+    recommendations = []
+    metrics = {}
+    
+    try:
+        # CORRECCIÓN CRÍTICA: Convertir a tipos consistentes
+        def safe_convert_to_array(data):
+            """Convertir datos a numpy array de forma segura."""
+            if hasattr(data, 'values'):
+                return data.values
+            elif isinstance(data, (list, tuple)):
+                return np.array(data)
+            else:
+                return np.array(data)
+        
+        # Convertir todos los datos a arrays numpy
+        X_train_array = safe_convert_to_array(X_train)
+        y_train_array = safe_convert_to_array(y_train)
+        X_val_array = safe_convert_to_array(X_val)
+        y_val_array = safe_convert_to_array(y_val)
+        
+        # Verificar que tenemos datos válidos
+        if X_train_array.shape[0] == 0 or X_val_array.shape[0] == 0:
+            raise ValueError("Datos vacíos para análisis de overfitting")
+        
+        if X_train_array.shape[1] == 0:
+            raise ValueError("No hay features para análisis de overfitting")
+        
+        # 1. Scores básicos
+        train_score = model.score(X_train_array, y_train_array)
+        val_score = model.score(X_val_array, y_val_array)
+        gap = train_score - val_score
+        
+        metrics.update({
+            'train_score': train_score,
+            'val_score': val_score,
+            'train_val_gap': gap
+        })
+        
+        # 2. Predicciones para métricas adicionales
+        try:
+            y_train_pred = model.predict(X_train_array)
+            y_val_pred = model.predict(X_val_array)
+        except Exception as e:
+            self.logger.warning(f"Error en predicciones: {e}")
+            # Usar scores como fallback
+            y_train_pred = np.full(len(y_train_array), np.mean(y_train_array))
+            y_val_pred = np.full(len(y_val_array), np.mean(y_val_array))
+        
+        # 3. Métricas detalladas
+        try:
+            train_mse = mean_squared_error(y_train_array, y_train_pred)
+            val_mse = mean_squared_error(y_val_array, y_val_pred)
+            train_mae = mean_absolute_error(y_train_array, y_train_pred)
+            val_mae = mean_absolute_error(y_val_array, y_val_pred)
+            
+            metrics.update({
+                'train_mse': train_mse,
+                'val_mse': val_mse,
+                'train_mae': train_mae,
+                'val_mae': val_mae,
+                'mse_ratio': val_mse / max(train_mse, 1e-8),
+                'mae_ratio': val_mae / max(train_mae, 1e-8)
+            })
+        except Exception as e:
+            self.logger.warning(f"Error calculando métricas detalladas: {e}")
+            metrics.update({
+                'train_mse': 0.0, 'val_mse': 0.0, 'train_mae': 0.0, 'val_mae': 0.0,
+                'mse_ratio': 1.0, 'mae_ratio': 1.0
+            })
+        
+        # 4. Análisis de varianza de predicciones
+        try:
+            train_pred_var = np.var(y_train_pred)
+            val_pred_var = np.var(y_val_pred)
+            
+            metrics.update({
+                'train_pred_variance': train_pred_var,
+                'val_pred_variance': val_pred_var,
+                'variance_ratio': val_pred_var / max(train_pred_var, 1e-8)
+            })
+        except Exception as e:
+            self.logger.warning(f"Error calculando varianzas: {e}")
+            metrics.update({
+                'train_pred_variance': 0.0,
+                'val_pred_variance': 0.0,
+                'variance_ratio': 1.0
+            })
+        
+        # 5. Detectar señales de overfitting
+        
+        # Gap train-validation excesivo
+        if gap > self.alert_metrics['train_val_gap']:
+            warnings_list.append(f"Gap train-val excesivo: {gap:.3f} > {self.alert_metrics['train_val_gap']}")
+            recommendations.append("Reducir complejidad del modelo o aumentar regularización")
+        
+        # Score de validación muy bajo
+        if val_score < self.alert_metrics['validation_r2']:
+            warnings_list.append(f"Score de validación muy bajo: {val_score:.3f}")
+            recommendations.append("Revisar calidad de datos o aumentar tamaño de dataset")
+        
+        # Varianza de predicciones inconsistente
+        if metrics['variance_ratio'] > 2.0:
+            warnings_list.append("Varianza de predicciones inconsistente entre train/val")
+            recommendations.append("Verificar distribución de datos y normalización")
+        
+        # MSE ratio muy alto
+        if metrics['mse_ratio'] > 2.0:
+            warnings_list.append(f"MSE en validación {metrics['mse_ratio']:.2f}x mayor que en training")
+            recommendations.append("Modelo memoriza training data - aumentar regularización")
+        
+        # 6. Análisis de curva de aprendizaje (si es posible)
+        try:
+            learning_analysis = self._analyze_learning_curve(model, X_train_array, y_train_array, X_val_array, y_val_array)
+            metrics.update(learning_analysis)
+            
+            if learning_analysis.get('learning_curve_slope', 0) > self.alert_metrics['learning_curve_slope']:
+                warnings_list.append("Curva de aprendizaje indica overfitting temprano")
+                recommendations.append("Implementar early stopping más agresivo")
+                
+        except Exception as e:
+            self.logger.warning(f"No se pudo analizar curva de aprendizaje: {e}")
+        
+        # 7. Determinar nivel de overfitting
+        overfitting_level = self._classify_overfitting_level(gap, val_score, metrics)
+        
+        # 8. Calcular score de overfitting (0-1, donde 1 = overfitting extremo)
+        overfitting_score = min(1.0, max(0.0, gap * 2.0 + (1.0 - max(val_score, 0)) * 0.5))
+        
+        # 9. Recomendaciones específicas según nivel
+        recommendations.extend(self._get_level_recommendations(overfitting_level))
+        
+        # 10. Logging
+        self.logger.info(f"Análisis de overfitting para {model_name}:")
+        self.logger.info(f"  Nivel: {overfitting_level.value.upper()}")
+        self.logger.info(f"  Score de overfitting: {overfitting_score:.3f}")
+        self.logger.info(f"  Gap train-val: {gap:.3f}")
+        self.logger.info(f"  Score validación: {val_score:.3f}")
+        
+        if warnings_list:
+            self.logger.warning(f"  Advertencias: {len(warnings_list)}")
+            for warning in warnings_list:
+                self.logger.warning(f"    - {warning}")
+        
+        return OverfittingReport(
+            level=overfitting_level,
+            score=overfitting_score,
+            train_score=train_score,
+            val_score=val_score,
+            gap=gap,
+            warnings=warnings_list,
+            recommendations=recommendations,
+            metrics=metrics
+        )
+        
+    except Exception as e:
+        self.logger.error(f"Error en detección de overfitting: {e}")
+        return OverfittingReport(
+            level=OverfittingLevel.EXTREME,
+            score=1.0,
+            train_score=0.0,
+            val_score=0.0,
+            gap=1.0,
+            warnings=[f"Error en análisis: {str(e)}"],
+            recommendations=["Verificar modelo y datos"],
+            metrics={}
+        )

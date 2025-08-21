@@ -1,23 +1,25 @@
 """
 Modelos con regularización agresiva para prevenir overfitting.
 Configuración específica para trading de criptomonedas.
+Versión limpia y corregida - NvBot3.
 """
 
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, Optional, Tuple, Union
+from typing import Dict, Any, Optional, Tuple, Union, List
 import xgboost as xgb
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.svm import SVC, SVR
 from sklearn.linear_model import Ridge, Lasso, ElasticNet
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.feature_selection import SelectKBest, f_regression
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import logging
+import warnings
 
 class RegularizedXGBoost:
     """
     XGBoost con regularización agresiva para trading.
+    Versión corregida que maneja arrays y DataFrames de forma segura.
     """
     
     def __init__(self, task_type: str = 'momentum'):
@@ -40,23 +42,21 @@ class RegularizedXGBoost:
         """Obtener parámetros específicos anti-overfitting por tarea."""
         
         base_params = {
-            'objective': 'reg:squarederror',
-            'eval_metric': 'rmse',
-            'n_estimators': 100,        # ⬇️ Menos árboles para reducir overfitting
-            'max_depth': 4,             # ⬇️ Árboles más simples
-            'learning_rate': 0.05,      # ⬇️ Aprendizaje lento y estable
-            'subsample': 0.7,           # 🎲 Solo 70% de datos por árbol
-            'colsample_bytree': 0.7,    # 🎲 Solo 70% de features por árbol
-            'colsample_bylevel': 0.8,   # 🎲 Feature sampling por nivel
-            'reg_alpha': 10,            # 🛡️ L1 regularization fuerte
-            'reg_lambda': 10,           # 🛡️ L2 regularization fuerte
-            'min_child_weight': 10,     # 🛡️ Mínimo peso por hoja
-            'gamma': 1,                 # 🛡️ Mínima ganancia para split
+            'n_estimators': 100,        # Menos árboles para reducir overfitting
+            'max_depth': 4,             # Árboles más simples
+            'learning_rate': 0.05,      # Aprendizaje lento y estable
+            'subsample': 0.7,           # Solo 70% de datos por árbol
+            'colsample_bytree': 0.7,    # Solo 70% de features por árbol
+            'colsample_bylevel': 0.8,   # Feature sampling por nivel
+            'min_child_weight': 5,      # Mínimo peso por hoja
+            'gamma': 1.0,               # Mínima ganancia para split
+            'reg_alpha': 5,             # Regularización L1
+            'reg_lambda': 5,            # Regularización L2
             'random_state': 42,
             'n_jobs': -1
         }
         
-        # Ajustes específicos por tarea
+        # Parámetros específicos por tipo de tarea
         if task_type == 'momentum':
             base_params.update({
                 'learning_rate': 0.03,
@@ -78,265 +78,278 @@ class RegularizedXGBoost:
         
         return base_params
     
-    def fit(self, X_train: pd.DataFrame, y_train: pd.Series, 
-            X_val: Optional[pd.DataFrame] = None, y_val: Optional[pd.Series] = None):
-        """
-        Entrenar modelo con regularización y early stopping.
-        """
-        # Normalizar features
-        X_train_scaled = self.scaler.fit_transform(X_train)
-        
-        # Selección de features para reducir dimensionalidad
-        X_train_selected = self.feature_selector.fit_transform(X_train_scaled, y_train)
-        
-        # Preparar eval_set para early stopping
-        eval_set = []
-        X_val_selected = None
-        if X_val is not None and y_val is not None:
-            X_val_scaled = self.scaler.transform(X_val)
-            X_val_selected = self.feature_selector.transform(X_val_scaled)
-            eval_set = [(X_val_selected, y_val)]
-        
-        # Crear y entrenar modelo
-        self.model = xgb.XGBRegressor(**self.params)
-        
-        # CORRECCIÓN CRÍTICA: Early stopping solo si hay datos de validación
-        fit_params = {
-            'verbose': False
-        }
-        
-        if eval_set:
-            fit_params['eval_set'] = eval_set
-            fit_params['early_stopping_rounds'] = 15  # Solo si hay eval_set
-        
-        self.model.fit(X_train_selected, y_train, **fit_params)
-        
-        # Log de importancia de features
-        feature_importance = self.model.feature_importances_
-        selected_features = self.feature_selector.get_support()
-        
-        self.logger.info(f"Modelo {self.task_type} entrenado:")
-        self.logger.info(f"  Features seleccionadas: {np.sum(selected_features)}/{len(selected_features)}")
-        self.logger.info(f"  Early stopping en iteración: {self.model.best_iteration if hasattr(self.model, 'best_iteration') else 'N/A'}")
-        self.logger.info(f"  Score en training: {self.model.score(X_train_selected, y_train):.4f}")
-        
-        if eval_set and X_val_selected is not None:
-            val_score = self.model.score(X_val_selected, y_val)
-            train_score = self.model.score(X_train_selected, y_train)
-            overfitting_gap = train_score - val_score
-            
-            self.logger.info(f"  Score en validación: {val_score:.4f}")
-            self.logger.info(f"  Gap train-val: {overfitting_gap:.4f}")
-            
-            if overfitting_gap > 0.15:
-                self.logger.warning(f"⚠️  OVERFITTING DETECTADO: Gap {overfitting_gap:.4f} > 0.15!")
+    def _safe_convert_to_array(self, data):
+        """Convertir datos a numpy array de forma segura."""
+        if hasattr(data, 'values'):
+            return data.values
+        elif isinstance(data, (list, tuple)):
+            return np.array(data)
+        else:
+            return np.array(data)
     
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
+    def fit(self, X_train, y_train, X_val=None, y_val=None, eval_set=None, **kwargs):
+        """
+        Entrenar modelo XGBoost con manejo seguro de datos.
+        
+        Args:
+            X_train: Features de entrenamiento (DataFrame o array)
+            y_train: Target de entrenamiento (Series o array)
+            X_val: Features de validación (opcional)
+            y_val: Target de validación (opcional)
+            eval_set: Lista de (X_val, y_val) para early stopping (opcional)
+            **kwargs: Argumentos adicionales (ignorados para compatibilidad)
+        """
+        try:
+            # Convertir datos de forma segura
+            X_train_array = self._safe_convert_to_array(X_train)
+            y_train_array = self._safe_convert_to_array(y_train)
+            
+            # Verificar que tenemos features
+            if X_train_array.shape[1] == 0:
+                raise ValueError(f"X_train no tiene features! Shape: {X_train_array.shape}")
+            
+            self.logger.info(f"Entrenando XGBoost {self.task_type} con {X_train_array.shape[1]} features")
+            
+            # Normalizar features
+            X_train_scaled = self.scaler.fit_transform(X_train_array)
+            
+            # Selección de features para reducir dimensionalidad
+            X_train_selected = self.feature_selector.fit_transform(X_train_scaled, y_train_array)
+            
+            # Preparar eval_set si está disponible
+            eval_set_processed = None
+            X_val_selected = None
+            y_val_array = None
+            
+            if eval_set is not None and len(eval_set) > 0:
+                try:
+                    X_val_raw, y_val_raw = eval_set[0]
+                    X_val_array = self._safe_convert_to_array(X_val_raw)
+                    y_val_array = self._safe_convert_to_array(y_val_raw)
+                    
+                    X_val_scaled = self.scaler.transform(X_val_array)
+                    X_val_selected = self.feature_selector.transform(X_val_scaled)
+                    eval_set_processed = [(X_val_selected, y_val_array)]
+                except Exception as e:
+                    self.logger.warning(f"Error procesando eval_set: {e}")
+            elif X_val is not None and y_val is not None:
+                X_val_array = self._safe_convert_to_array(X_val)
+                y_val_array = self._safe_convert_to_array(y_val)
+                
+                X_val_scaled = self.scaler.transform(X_val_array)
+                X_val_selected = self.feature_selector.transform(X_val_scaled)
+                eval_set_processed = [(X_val_selected, y_val_array)]
+            
+            # Crear modelo XGBoost con parámetros seguros
+            try:
+                self.model = xgb.XGBRegressor(**self.params)
+            except Exception as e:
+                self.logger.warning(f"Error con parámetros completos: {e}")
+                # Fallback con parámetros mínimos
+                minimal_params = {
+                    'n_estimators': self.params.get('n_estimators', 100),
+                    'max_depth': self.params.get('max_depth', 4),
+                    'learning_rate': self.params.get('learning_rate', 0.05),
+                    'random_state': self.params.get('random_state', 42)
+                }
+                self.model = xgb.XGBRegressor(**minimal_params)
+                self.logger.info("Usando parámetros mínimos para XGBoost")
+            
+            # Preparar parámetros de entrenamiento
+            fit_params = {}
+            fit_params['verbose'] = False
+            
+            if eval_set_processed:
+                fit_params['eval_set'] = eval_set_processed
+                fit_params['early_stopping_rounds'] = 15
+            
+            # Entrenar modelo
+            try:
+                self.model.fit(X_train_selected, y_train_array, **fit_params)
+            except Exception as e:
+                self.logger.warning(f"Error en fit con eval_set: {e}")
+                # Fallback: entrenar sin eval_set
+                self.model.fit(X_train_selected, y_train_array, verbose=False)
+            
+            # Log de resultados
+            selected_features = self.feature_selector.get_support()
+            
+            self.logger.info(f"Modelo {self.task_type} entrenado:")
+            self.logger.info(f"  Features seleccionadas: {np.sum(selected_features)}/{len(selected_features)}")
+            self.logger.info(f"  Early stopping en iteración: {getattr(self.model, 'best_iteration', 'N/A')}")
+            
+            # Calcular scores si es posible
+            try:
+                train_score = self.model.score(X_train_selected, y_train_array)
+                self.logger.info(f"  Score en training: {train_score:.4f}")
+                
+                if eval_set_processed and X_val_selected is not None and y_val_array is not None:
+                    val_score = self.model.score(X_val_selected, y_val_array)
+                    overfitting_gap = train_score - val_score
+                    
+                    self.logger.info(f"  Score en validación: {val_score:.4f}")
+                    self.logger.info(f"  Gap train-val: {overfitting_gap:.4f}")
+                    
+                    if overfitting_gap > 0.15:
+                        self.logger.warning(f"⚠️  OVERFITTING DETECTADO: Gap {overfitting_gap:.4f} > 0.15!")
+            except Exception as e:
+                self.logger.warning(f"Error calculando scores: {e}")
+                
+        except Exception as e:
+            self.logger.error(f"Error en entrenamiento XGBoost: {e}")
+            raise
+    
+    def predict(self, X) -> np.ndarray:
         """Hacer predicciones con el modelo entrenado."""
         if self.model is None:
             raise ValueError("Modelo no ha sido entrenado")
         
-        X_scaled = self.scaler.transform(X)
+        # Convertir a array de forma segura
+        X_array = self._safe_convert_to_array(X)
+        
+        # Verificar que tenemos features
+        if X_array.shape[1] == 0:
+            raise ValueError(f"X no tiene features para predicción! Shape: {X_array.shape}")
+        
+        X_scaled = self.scaler.transform(X_array)
         X_selected = self.feature_selector.transform(X_scaled)
         return self.model.predict(X_selected)
     
-    def score(self, X: pd.DataFrame, y: pd.Series) -> float:
+    def score(self, X, y) -> float:
         """Calcular R² score para compatibilidad con sklearn."""
         if self.model is None:
             raise ValueError("Modelo no ha sido entrenado")
         
         predictions = self.predict(X)
-        return r2_score(y, predictions)
-    
-    def get_feature_importance(self) -> pd.Series:
-        """Obtener importancia de features seleccionadas."""
-        if self.model is None:
-            raise ValueError("Modelo no ha sido entrenado")
-        
-        selected_features = self.feature_selector.get_support()
-        feature_names = [f"feature_{i}" for i in range(len(selected_features)) if selected_features[i]]
-        
-        return pd.Series(self.model.feature_importances_, index=feature_names).sort_values(ascending=False)
+        y_array = self._safe_convert_to_array(y)
+        return r2_score(y_array, predictions)
 
-class RegularizedTimeSeriesModel:
+
+class TemporalFeatureModel:
     """
-    Modelo temporal regularizado usando Gradient Boosting para patrones temporales.
-    Alternativa robusta a LSTM sin dependencia de TensorFlow.
+    Modelo con features temporales específicos para series de tiempo.
     """
     
-    def __init__(self, sequence_length: int = 24, task_type: str = 'rebound'):
+    def __init__(self, task_type: str = 'momentum', lookback_periods: Optional[List[int]] = None):
         """
-        Inicializar modelo temporal regularizado.
+        Inicializar modelo temporal.
         
         Args:
-            sequence_length: Longitud de secuencia temporal
-            task_type: Tipo de tarea ('rebound', 'momentum')
+            task_type: Tipo de tarea
+            lookback_periods: Períodos de lookback para features temporales
         """
-        self.sequence_length = sequence_length
         self.task_type = task_type
-        self.scaler = RobustScaler()  # Más robusto para datos financieros
+        self.lookback_periods = lookback_periods or [5, 10, 20, 50]
+        self.scaler = RobustScaler()  # Más robusto para outliers
         self.feature_selector = SelectKBest(score_func=f_regression, k=30)
-        self.model = None
         self.logger = logging.getLogger(__name__)
-        
-        # Configurar modelo según tarea
-        self._configure_model()
+        self.model = None
+        self.feature_names_ = None
     
-    def _configure_model(self):
-        """Configurar modelo con regularización fuerte según tarea."""
+    def _create_temporal_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Crear features temporales avanzados."""
+        features = df.copy()
         
-        base_params = {
-            'n_estimators': 50,          # ⬇️ Menos estimators para reducir overfitting
-            'learning_rate': 0.05,       # ⬇️ Aprendizaje lento
-            'max_depth': 3,              # ⬇️ Árboles simples
-            'min_samples_split': 20,     # 🛡️ Mínimas muestras para split
-            'min_samples_leaf': 10,      # 🛡️ Mínimas muestras por hoja
-            'subsample': 0.7,            # 🎲 Solo 70% de datos por árbol
-            'max_features': 'sqrt',      # 🎲 Feature subsampling
-            'random_state': 42,
-            'validation_fraction': 0.2,  # Para early stopping
-            'n_iter_no_change': 10       # Early stopping
-        }
+        # Features de momentum
+        for period in self.lookback_periods:
+            if 'price' in df.columns:
+                features[f'returns_{period}'] = df['price'].pct_change(period)
+                features[f'volatility_{period}'] = df['price'].pct_change().rolling(period).std()
+                features[f'momentum_{period}'] = df['price'] / df['price'].shift(period) - 1
+            
+            if 'volume' in df.columns:
+                features[f'volume_ma_{period}'] = df['volume'].rolling(period).mean()
+                features[f'volume_ratio_{period}'] = df['volume'] / features[f'volume_ma_{period}']
         
-        if self.task_type == 'rebound':
-            # Para rebotes: mayor regularización
-            base_params.update({
-                'learning_rate': 0.03,
-                'max_depth': 2,
-                'min_samples_split': 30,
-                'min_samples_leaf': 15
-            })
-        elif self.task_type == 'momentum':
-            # Para momentum: balance regularización/expresividad
-            base_params.update({
-                'learning_rate': 0.05,
-                'max_depth': 3,
-                'min_samples_split': 20,
-                'min_samples_leaf': 10
-            })
+        # Features de tendencia
+        if 'price' in df.columns:
+            features['trend_5_20'] = df['price'].rolling(5).mean() / df['price'].rolling(20).mean() - 1
+            features['trend_10_50'] = df['price'].rolling(10).mean() / df['price'].rolling(50).mean() - 1
         
-        # Crear el modelo aquí
-        self.model = GradientBoostingRegressor(**base_params)
+        # Limpiar NaN
+        features = features.ffill().fillna(0)
+        
+        return features
     
-    def _create_temporal_features(self, X: np.ndarray) -> np.ndarray:
-        """Crear features temporales usando ventanas deslizantes."""
-        
-        n_samples, n_features = X.shape
-        temporal_features = []
-        
-        for i in range(self.sequence_length, n_samples):
-            # Ventana actual
-            window = X[i-self.sequence_length:i]
+    def fit(self, X_train, y_train, X_val=None, y_val=None, **kwargs):
+        """Entrenar modelo temporal."""
+        try:
+            # Crear features temporales
+            if isinstance(X_train, pd.DataFrame):
+                X_temporal = self._create_temporal_features(X_train)
+            else:
+                # Si es array, convertir a DataFrame con nombres genéricos
+                temp_df = pd.DataFrame(X_train, columns=[f'feature_{i}' for i in range(X_train.shape[1])])
+                X_temporal = self._create_temporal_features(temp_df)
             
-            # Features estadísticas por ventana
-            window_features = []
+            # Excluir target si existe
+            feature_cols = [col for col in X_temporal.columns if col != 'target']
+            X_features = X_temporal[feature_cols]
             
-            for j in range(n_features):
-                feature_series = window[:, j]
-                
-                # Estadísticas básicas
-                window_features.extend([
-                    np.mean(feature_series),      # Media
-                    np.std(feature_series),       # Desviación
-                    np.min(feature_series),       # Mínimo
-                    np.max(feature_series),       # Máximo
-                    feature_series[-1]            # Valor actual
-                ])
-                
-                # Tendencia (diferencia primera)
-                if len(feature_series) > 1:
-                    diff = np.diff(feature_series)
-                    window_features.extend([
-                        np.mean(diff),            # Tendencia promedio
-                        np.std(diff)              # Volatilidad de cambio
-                    ])
-                else:
-                    window_features.extend([0.0, 0.0])
+            self.logger.info(f"Features temporales creadas: {len(feature_cols)}")
             
-            temporal_features.append(window_features)
-        
-        return np.array(temporal_features)
-    
-    def fit(self, X_train: pd.DataFrame, y_train: pd.Series,
-            X_val: Optional[pd.DataFrame] = None, y_val: Optional[pd.Series] = None):
-        """
-        Entrenar modelo temporal con regularización.
-        """
-        # Normalizar datos
-        X_train_scaled = self.scaler.fit_transform(X_train)
-        
-        # Crear features temporales
-        X_train_temporal = self._create_temporal_features(X_train_scaled)
-        y_train_temporal = np.array(y_train.iloc[self.sequence_length:])
-        
-        # Selección de features para reducir dimensionalidad
-        X_train_selected = self.feature_selector.fit_transform(X_train_temporal, y_train_temporal)
-        
-        # Preparar validación si está disponible
-        X_val_selected = None
-        y_val_temporal = None
-        if X_val is not None and y_val is not None:
-            X_val_scaled = self.scaler.transform(X_val)
-            X_val_temporal = self._create_temporal_features(X_val_scaled)
-            X_val_selected = self.feature_selector.transform(X_val_temporal)
-            y_val_temporal = np.array(y_val.iloc[self.sequence_length:])
-        
-        # Entrenar modelo (modelo ya configurado en __init__)
-        if self.model is not None:
-            self.model.fit(X_train_selected, y_train_temporal)
+            # Convertir y procesar
+            X_array = X_features.values
+            y_array = np.array(y_train) if hasattr(y_train, '__iter__') else y_train
             
-            # Logging de resultados
-            train_score = self.model.score(X_train_selected, y_train_temporal)
+            # Normalizar
+            X_scaled = self.scaler.fit_transform(X_array)
+            
+            # Selección de features
+            X_selected = self.feature_selector.fit_transform(X_scaled, y_array)
+            
+            # Entrenar modelo Ridge (más estable para features temporales)
+            self.model = Ridge(alpha=10.0, random_state=42)
+            self.model.fit(X_selected, y_array)
+            
+            # Guardar nombres de features para logging
+            self.feature_names_ = feature_cols
+            selected_mask = self.feature_selector.get_support()
+            selected_features = [name for name, selected in zip(feature_cols, selected_mask) if selected]
             
             self.logger.info(f"Modelo Temporal {self.task_type} entrenado:")
-            self.logger.info(f"  Features temporales creadas: {X_train_temporal.shape[1]}")
-            self.logger.info(f"  Features seleccionadas: {X_train_selected.shape[1]}")
+            self.logger.info(f"  Features temporales creadas: {len(feature_cols)}")
+            self.logger.info(f"  Features seleccionadas: {len(selected_features)}")
+            
+            # Calcular score
+            train_score = self.model.score(X_selected, y_array)
             self.logger.info(f"  Score en training: {train_score:.4f}")
             
-            if X_val_selected is not None and y_val_temporal is not None:
-                val_score = self.model.score(X_val_selected, y_val_temporal)
-                overfitting_gap = train_score - val_score
-                
-                self.logger.info(f"  Score en validación: {val_score:.4f}")
-                self.logger.info(f"  Gap train-val: {overfitting_gap:.4f}")
-                
-                if overfitting_gap < 0.05:  # Diferencia pequeña = buen signo
-                    self.logger.info("✅ Modelo bien regularizado")
-                elif overfitting_gap > 0.2:
-                    self.logger.warning(f"⚠️  OVERFITTING DETECTADO: Gap {overfitting_gap:.4f} > 0.2!")
-        else:
-            raise ValueError("Error: Modelo no se pudo configurar correctamente")
+        except Exception as e:
+            self.logger.error(f"Error en entrenamiento Temporal: {e}")
+            raise
     
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """Hacer predicciones con modelo temporal entrenado."""
+    def predict(self, X) -> np.ndarray:
+        """Hacer predicciones."""
         if self.model is None:
             raise ValueError("Modelo no ha sido entrenado")
         
-        X_scaled = self.scaler.transform(X)
-        X_temporal = self._create_temporal_features(X_scaled)
-        X_selected = self.feature_selector.transform(X_temporal)
+        # Crear features temporales
+        if isinstance(X, pd.DataFrame):
+            X_temporal = self._create_temporal_features(X)
+        else:
+            temp_df = pd.DataFrame(X, columns=[f'feature_{i}' for i in range(X.shape[1])])
+            X_temporal = self._create_temporal_features(temp_df)
+        
+        # Usar los mismos features que en entrenamiento
+        if self.feature_names_:
+            feature_cols = [col for col in self.feature_names_ if col in X_temporal.columns]
+            X_features = X_temporal[feature_cols]
+        else:
+            feature_cols = [col for col in X_temporal.columns if col != 'target']
+            X_features = X_temporal[feature_cols]
+        
+        X_array = X_features.values
+        X_scaled = self.scaler.transform(X_array)
+        X_selected = self.feature_selector.transform(X_scaled)
         
         return self.model.predict(X_selected)
     
-    def score(self, X: pd.DataFrame, y: pd.Series) -> float:
-        """Calcular R² score para compatibilidad con sklearn."""
-        if self.model is None:
-            raise ValueError("Modelo no ha sido entrenado")
-        
+    def score(self, X, y) -> float:
+        """Calcular R² score."""
         predictions = self.predict(X)
-        # Ajustar tamaños para datos temporales
-        min_len = min(len(predictions), len(y))
-        return r2_score(y.iloc[-min_len:], predictions[-min_len:])
-    
-    def get_feature_importance(self) -> pd.Series:
-        """Obtener importancia de features temporales."""
-        if self.model is None:
-            raise ValueError("Modelo no ha sido entrenado")
-        
-        selected_features = self.feature_selector.get_support()
-        feature_names = [f"temporal_feature_{i}" for i in range(len(selected_features)) if selected_features[i]]
-        
-        return pd.Series(self.model.feature_importances_, index=feature_names).sort_values(ascending=False)
+        y_array = np.array(y) if hasattr(y, '__iter__') else y
+        return r2_score(y_array, predictions)
 
 
 class RegularizedEnsemble:
@@ -345,139 +358,85 @@ class RegularizedEnsemble:
     """
     
     def __init__(self, task_type: str = 'momentum'):
-        """
-        Inicializar ensemble de modelos.
-        
-        Args:
-            task_type: Tipo de tarea ('momentum', 'regime', 'rebound')
-        """
+        """Inicializar ensemble regularizado."""
         self.task_type = task_type
-        self.scaler = StandardScaler()
+        self.logger = logging.getLogger(__name__)
         self.models = {}
         self.weights = {}
-        self.logger = logging.getLogger(__name__)
+        self.scaler = StandardScaler()
         
-        self._initialize_models()
+        # Definir modelos del ensemble
+        self.model_configs = {
+            'xgb': RegularizedXGBoost(task_type),
+            'ridge': Ridge(alpha=10.0, random_state=42),
+            'elastic': ElasticNet(alpha=1.0, l1_ratio=0.5, random_state=42),
+            'rf': RandomForestRegressor(
+                n_estimators=50, max_depth=5, min_samples_split=10,
+                min_samples_leaf=5, random_state=42, n_jobs=-1
+            ),
+            'temporal': TemporalFeatureModel(task_type)
+        }
     
-    def _initialize_models(self):
-        """Inicializar conjunto de modelos complementarios."""
-        
-        # XGBoost regularizado
-        self.models['xgb'] = RegularizedXGBoost(self.task_type)
-        
-        # Ridge con regularización fuerte
-        self.models['ridge'] = Ridge(alpha=10.0, random_state=42)
-        
-        # Elastic Net para selección automática de features
-        self.models['elastic'] = ElasticNet(alpha=1.0, l1_ratio=0.5, random_state=42)
-        
-        # Random Forest con alta regularización
-        self.models['rf'] = RandomForestRegressor(
-            n_estimators=50,
-            max_depth=4,
-            min_samples_split=20,
-            min_samples_leaf=10,
-            max_features='sqrt',
-            random_state=42
-        )
-        
-        # Modelo temporal
-        self.models['temporal'] = RegularizedTimeSeriesModel(task_type=self.task_type)
-    
-    def fit(self, X_train: pd.DataFrame, y_train: pd.Series,
-            X_val: Optional[pd.DataFrame] = None, y_val: Optional[pd.Series] = None):
-        """
-        Entrenar ensemble de modelos con validación cruzada.
-        """
-        X_train_scaled = self.scaler.fit_transform(X_train)
-        X_train_df = pd.DataFrame(X_train_scaled, columns=X_train.columns, index=X_train.index)
-        
-        # Preparar validación
-        X_val_scaled = None
-        X_val_df = None
-        if X_val is not None:
-            X_val_scaled = self.scaler.transform(X_val)
-            X_val_df = pd.DataFrame(X_val_scaled, columns=X_val.columns, index=X_val.index)
-        
-        val_scores = {}
-        
-        # Entrenar cada modelo
-        model_names = list(self.models.keys())  # Crear lista inmutable
-        for name in model_names:
-            model = self.models[name]
-            try:
-                self.logger.info(f"Entrenando modelo {name}...")
-                
-                # CORRECCIÓN: Usar solo argumentos básicos para sklearn
-                if name == 'temporal':
-                    # Modelo temporal personalizado
-                    model.fit(X_train_df, y_train, X_val_df, y_val)
-                elif name == 'xgb':
-                    # XGBoost personalizado
-                    model.fit(X_train_df, y_train, X_val_df, y_val)
-                else:
-                    # Modelos sklearn estándar (Ridge, ElasticNet, RandomForest)
-                    model.fit(X_train_scaled, y_train)
-                
-                # Calcular score de validación si está disponible
-                if X_val is not None and y_val is not None:
-                    if name == 'temporal':
-                        val_pred = model.predict(X_val_df)
-                        # Ajustar tamaños si es necesario
-                        min_len = min(len(val_pred), len(y_val))
-                        val_score = r2_score(y_val.iloc[-min_len:], val_pred[-min_len:])
-                    elif name == 'xgb':
-                        # RegularizedXGBoost usa su propio predict method
-                        val_pred = model.predict(X_val_df)
-                        val_score = r2_score(y_val, val_pred)
-                    else:
-                        val_score = model.score(X_val_scaled, y_val)
+    def fit(self, X_train, y_train, X_val=None, y_val=None, **kwargs):
+        """Entrenar ensemble de modelos."""
+        try:
+            # Preparar datos
+            X_array = np.array(X_train) if hasattr(X_train, 'values') else X_train
+            y_array = np.array(y_train) if hasattr(y_train, 'values') else y_train
+            
+            # Normalizar para modelos que lo necesiten
+            X_scaled = self.scaler.fit_transform(X_array)
+            
+            active_models = []
+            
+            # Entrenar cada modelo
+            for name, model in self.model_configs.items():
+                try:
+                    self.logger.info(f"Entrenando modelo {name}...")
                     
-                    val_scores[name] = val_score
-                    self.logger.info(f"  {name}: Score validación = {val_score:.4f}")
-                
-            except Exception as e:
-                self.logger.error(f"Error entrenando {name}: {e}")
-                # Remover modelo que falló
-                if name in self.models:
-                    del self.models[name]
-        
-        # Calcular pesos basados en performance de validación
-        if val_scores:
-            # Pesos proporcionales al score (solo scores positivos)
-            positive_scores = {k: max(v, 0.01) for k, v in val_scores.items()}
-            total_score = sum(positive_scores.values())
-            self.weights = {k: v/total_score for k, v in positive_scores.items()}
-        else:
-            # Pesos uniformes si no hay validación
-            n_models = len(self.models)
-            self.weights = {name: 1.0/n_models for name in self.models.keys()}
-        
-        self.logger.info(f"Ensemble {self.task_type} entrenado:")
-        self.logger.info(f"  Modelos activos: {list(self.models.keys())}")
-        self.logger.info(f"  Pesos: {self.weights}")
+                    if name == 'xgb' or name == 'temporal':
+                        # Modelos que manejan sus propios datos
+                        model.fit(X_train, y_train, X_val, y_val)
+                    else:
+                        # Modelos sklearn estándar
+                        model.fit(X_scaled, y_array)
+                    
+                    self.models[name] = model
+                    active_models.append(name)
+                    
+                except Exception as e:
+                    self.logger.warning(f"Error entrenando {name}: {e}")
+            
+            if not active_models:
+                raise ValueError("No se pudo entrenar ningún modelo del ensemble")
+            
+            # Pesos iguales para simplicidad (podría optimizarse)
+            weight = 1.0 / len(active_models)
+            self.weights = {name: weight for name in active_models}
+            
+            self.logger.info(f"Ensemble {self.task_type} entrenado:")
+            self.logger.info(f"  Modelos activos: {active_models}")
+            self.logger.info(f"  Pesos: {self.weights}")
+            
+        except Exception as e:
+            self.logger.error(f"Error en entrenamiento Ensemble: {e}")
+            raise
     
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """Hacer predicciones con ensemble ponderado."""
+    def predict(self, X) -> np.ndarray:
+        """Hacer predicciones con ensemble."""
         if not self.models:
-            raise ValueError("No hay modelos entrenados")
-        
-        X_scaled = self.scaler.transform(X)
-        X_df = pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
+            raise ValueError("Ensemble no ha sido entrenado")
         
         predictions = []
         weights = []
         
+        X_array = np.array(X) if hasattr(X, 'values') else X
+        X_scaled = self.scaler.transform(X_array)
+        
         for name, model in self.models.items():
             try:
-                if name == 'temporal':
-                    pred = model.predict(X_df)
-                    # Ajustar tamaño de predicción
-                    if len(pred) < len(X):
-                        # Rellenar con última predicción
-                        pred = np.concatenate([np.full(len(X) - len(pred), pred[0]), pred])
-                    elif len(pred) > len(X):
-                        pred = pred[-len(X):]
+                if name == 'xgb' or name == 'temporal':
+                    pred = model.predict(X)
                 else:
                     pred = model.predict(X_scaled)
                 
@@ -485,26 +444,17 @@ class RegularizedEnsemble:
                 weights.append(self.weights[name])
                 
             except Exception as e:
-                self.logger.warning(f"Error en predicción de {name}: {e}")
-                continue
+                self.logger.warning(f"Error en predicción {name}: {e}")
         
         if not predictions:
-            raise ValueError("No se pudieron generar predicciones")
+            raise ValueError("No se pudo hacer predicciones con ningún modelo")
         
         # Promedio ponderado
-        predictions = np.array(predictions)
-        weights = np.array(weights)
-        weights = weights / weights.sum()  # Renormalizar
-        
-        return np.average(predictions, axis=0, weights=weights)
+        weighted_pred = np.average(predictions, axis=0, weights=weights)
+        return weighted_pred
     
-    def score(self, X: pd.DataFrame, y: pd.Series) -> float:
-        """Calcular R² score promedio del ensemble."""
-        if not self.models:
-            raise ValueError("No hay modelos entrenados en el ensemble")
-        
+    def score(self, X, y) -> float:
+        """Calcular R² score del ensemble."""
         predictions = self.predict(X)
-        return r2_score(y, predictions)
-
-# Alias para compatibilidad
-RegularizedLSTM = RegularizedTimeSeriesModel
+        y_array = np.array(y) if hasattr(y, 'values') else y
+        return r2_score(y_array, predictions)

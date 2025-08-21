@@ -1,0 +1,84 @@
+walk_forward_validator.py
+
+# 🔧 CORRECCIÓN ESPECÍFICA - walk_forward_validator.py
+# Línea 156-160 en el método _train_and_evaluate_period()
+
+def _train_and_evaluate_period(self, 
+                              train_data: pd.DataFrame, 
+                              test_data: pd.DataFrame,
+                              model_class: Any,
+                              model_params: Dict,
+                              iteration: int) -> WalkForwardResult:
+    """
+    Entrenar y evaluar para un período específico.
+    """
+    # CORRECCIÓN CRÍTICA: Separar features y targets correctamente
+    
+    # ANTES (PROBLEMÁTICO):
+    # feature_cols = [col for col in train_data.columns if col.startswith('feature_')]
+    
+    # DESPUÉS (CORREGIDO):
+    # Buscar todas las columnas EXCEPTO 'target' y columnas de timestamp
+    exclude_cols = {'target', 'timestamp', 'close_time', 'date'}
+    feature_cols = [col for col in train_data.columns if col not in exclude_cols]
+    
+    # Verificación de seguridad
+    if not feature_cols:
+        # Fallback: usar columnas específicas conocidas
+        known_features = ['price', 'volume', 'rsi', 'ma_20', 'ma_50', 'volatility_20', 'returns']
+        feature_cols = [col for col in known_features if col in train_data.columns]
+        
+        if not feature_cols:
+            raise ValueError(f"No se encontraron features válidas en los datos. Columnas disponibles: {list(train_data.columns)}")
+    
+    # Log para debugging
+    self.logger.info(f"Features detectadas: {feature_cols}")
+    self.logger.info(f"Shape de datos: Train{train_data.shape}, Test{test_data.shape}")
+    
+    target_col = 'target'  # Asumiendo columna target
+    
+    # Verificar que target existe
+    if target_col not in train_data.columns:
+        raise ValueError(f"Columna target '{target_col}' no encontrada. Columnas disponibles: {list(train_data.columns)}")
+    
+    X_train = train_data[feature_cols]
+    y_train = train_data[target_col]
+    X_test = test_data[feature_cols]
+    y_test = test_data[target_col]
+    
+    # Verificación final
+    assert X_train.shape[1] > 0, f"X_train tiene 0 features! Features: {feature_cols}"
+    assert X_test.shape[1] > 0, f"X_test tiene 0 features! Features: {feature_cols}"
+    
+    # Entrenar modelo
+    model = model_class(**model_params)
+    
+    # CORRECCIÓN: Solo argumentos básicos para fit()
+    model.fit(X_train, y_train)  # No pasar eval_set aquí
+    
+    # Resto del método sin cambios...
+    predictions = model.predict(X_test)
+    
+    # Calcular confidence scores si es posible
+    if hasattr(model, 'predict_proba'):
+        confidence_scores = model.predict_proba(X_test)[:, 1]
+    else:
+        confidence_scores = np.abs(predictions)
+    
+    # Calcular métricas
+    performance = self._calculate_metrics(np.array(y_test), predictions, confidence_scores)
+    
+    # Detectar régimen de mercado
+    market_regime = self._detect_market_regime(test_data)
+    
+    return WalkForwardResult(
+        period_start=test_data.index[0],
+        period_end=test_data.index[-1],
+        train_size=len(X_train),
+        test_size=len(X_test),
+        model_performance=performance,
+        predictions=predictions,
+        actuals=np.array(y_test.values),
+        market_regime=market_regime,
+        confidence_scores=confidence_scores
+    )

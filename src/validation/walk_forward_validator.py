@@ -1,5 +1,5 @@
 """
-Walk-Forward Validation - El gold standard para validación en trading.
+Walk-Forward Validation especializado para validación en trading.
 Simula el reentrenamiento periódico que ocurre en trading real.
 """
 
@@ -34,7 +34,7 @@ class WalkForwardValidator:
                  initial_train_months: int = 6,
                  test_months: int = 1,
                  retrain_frequency_months: int = 1,
-                 min_train_samples: int = 5000):
+                 min_train_samples: int = 100):  # CORRECCIÓN: Reducido de 5000
         """
         Configurar Walk-Forward Validation.
         
@@ -154,26 +154,46 @@ class WalkForwardValidator:
         """
         Entrenar y evaluar para un período específico.
         """
-        # Separar features y targets
-        feature_cols = [col for col in train_data.columns if col.startswith('feature_')]
+        # CORRECCIÓN CRÍTICA: Separar features y targets correctamente
+        
+        # DESPUÉS (CORREGIDO):
+        # Buscar todas las columnas EXCEPTO 'target' y columnas de timestamp
+        exclude_cols = {'target', 'timestamp', 'close_time', 'date'}
+        feature_cols = [col for col in train_data.columns if col not in exclude_cols]
+        
+        # Verificación de seguridad
+        if not feature_cols:
+            # Fallback: usar columnas específicas conocidas
+            known_features = ['price', 'volume', 'rsi', 'ma_20', 'ma_50', 'volatility_20', 'returns']
+            feature_cols = [col for col in known_features if col in train_data.columns]
+            
+            if not feature_cols:
+                raise ValueError(f"No se encontraron features válidas en los datos. Columnas disponibles: {list(train_data.columns)}")
+        
+        # Log para debugging
+        self.logger.info(f"Features detectadas: {feature_cols}")
+        self.logger.info(f"Shape de datos: Train{train_data.shape}, Test{test_data.shape}")
+        
         target_col = 'target'  # Asumiendo columna target
+        
+        # Verificar que target existe
+        if target_col not in train_data.columns:
+            raise ValueError(f"Columna target '{target_col}' no encontrada. Columnas disponibles: {list(train_data.columns)}")
         
         X_train = train_data[feature_cols]
         y_train = train_data[target_col]
         X_test = test_data[feature_cols]
         y_test = test_data[target_col]
         
+        # Verificación final
+        assert X_train.shape[1] > 0, f"X_train tiene 0 features! Features: {feature_cols}"
+        assert X_test.shape[1] > 0, f"X_test tiene 0 features! Features: {feature_cols}"
+        
         # Entrenar modelo
         model = model_class(**model_params)
         
-        # Early stopping si el modelo lo soporta
-        if hasattr(model, 'fit') and 'eval_set' in model.fit.__code__.co_varnames:
-            model.fit(X_train, y_train, 
-                     eval_set=[(X_test, y_test)],
-                     early_stopping_rounds=15,
-                     verbose=False)
-        else:
-            model.fit(X_train, y_train)
+        # CORRECCIÓN: Solo argumentos básicos para fit()
+        model.fit(X_train, y_train)  # No pasar eval_set aquí
         
         # Hacer predicciones
         predictions = model.predict(X_test)

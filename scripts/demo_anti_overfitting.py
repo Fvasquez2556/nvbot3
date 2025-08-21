@@ -1,297 +1,363 @@
 """
-Demo completo del sistema anti-overfitting NvBot3.
-Ejemplo de uso de todos los módulos implementados.
+Demo simplificado y funcional del sistema anti-overfitting NvBot3.
+Versión corregida que usa las interfaces reales de los módulos.
 """
-
-import sys
-import os
-sys.path.append('src')
 
 import numpy as np
 import pandas as pd
 import logging
-from datetime import datetime, timedelta
+from pathlib import Path
+import sys
+from typing import Optional, Dict, Any, List
+import warnings
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def create_sample_crypto_data(n_samples: int = 1000) -> pd.DataFrame:
-    """Crear datos de prueba simulando series temporales de crypto."""
-    
-    # Generar fechas
-    dates = pd.date_range(start='2023-01-01', periods=n_samples, freq='1h')
-    
-    # Simular datos de crypto con tendencia y volatilidad
-    np.random.seed(42)
-    
-    # Price simulation con trend y volatilidad
-    price_base = 50000  # BTC base price
-    trend = np.cumsum(np.random.normal(0, 0.01, n_samples))
-    volatility = np.random.normal(0, 0.02, n_samples)
-    prices = price_base * (1 + trend + volatility)
-    
-    # Features técnicos
-    volume = np.random.exponential(1000, n_samples)
-    rsi = 50 + 30 * np.sin(np.linspace(0, 20*np.pi, n_samples)) + np.random.normal(0, 5, n_samples)
-    rsi = np.clip(rsi, 0, 100)
-    
-    # Moving averages con ventana mínima para evitar NaN
-    price_series = pd.Series(prices)
-    ma_20 = price_series.rolling(20, min_periods=1).mean()
-    ma_50 = price_series.rolling(50, min_periods=1).mean()
-    
-    # Volatility
-    returns = price_series.pct_change().fillna(0)
-    volatility_20 = returns.rolling(20, min_periods=1).std().fillna(0)
-    
-    # Target: predicir retorno próxima hora
-    future_return = returns.shift(-1).fillna(0)
-    
-    df = pd.DataFrame({
-        'timestamp': dates,
-        'price': prices,
-        'volume': volume,
-        'rsi': rsi,
-        'ma_20': ma_20,
-        'ma_50': ma_50,
-        'volatility_20': volatility_20,
-        'returns': returns,
-        'target': future_return
-    }).set_index('timestamp')
-    
-    # Verificar y limpiar cualquier NaN restante
-    df = df.ffill().fillna(0)
-    
-    return df
+# Suprimir warnings innecesarios
+warnings.filterwarnings('ignore', category=UserWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
 
-def demo_temporal_validation():
-    """Demostrar validación temporal estricta."""
-    logger.info("=== DEMO: Validación Temporal ===")
-    
-    from validation import TemporalValidator
-    
-    # Crear datos de prueba
-    df = create_sample_crypto_data(1000)
-    
-    # Inicializar validador temporal con ratios específicos
-    validator = TemporalValidator(train_ratio=0.7, val_ratio=0.15, test_ratio=0.15)
-    
-    # Hacer split temporal
-    train_data, val_data, test_data = validator.temporal_split(df)
-    
-    logger.info(f"Train: {len(train_data)} muestras ({train_data.index[0]} - {train_data.index[-1]})")
-    logger.info(f"Val: {len(val_data)} muestras ({val_data.index[0]} - {val_data.index[-1]})")
-    logger.info(f"Test: {len(test_data)} muestras ({test_data.index[0]} - {test_data.index[-1]})")
-    
-    # Validar que no hay data leakage
-    try:
-        validator.validate_no_data_leakage(train_data, val_data, test_data)
-        logger.info("✅ No se detectó data leakage")
-    except ValueError as e:
-        logger.error(f"❌ Data leakage detectado: {e}")
+# Agregar src al path
+src_path = Path(__file__).parent.parent / 'src'
+if str(src_path) not in sys.path:
+    sys.path.append(str(src_path))
 
-def demo_walk_forward_validation():
-    """Demostrar walk-forward validation."""
-    logger.info("\n=== DEMO: Walk-Forward Validation ===")
+def create_simple_test_data(n_samples: int = 1000) -> pd.DataFrame:
+    """
+    Crear datos simples para testing sin errores de typing.
     
-    from validation import WalkForwardValidator
-    from models import RegularizedXGBoost
-    
-    # Crear datos de prueba con más muestras para WF
-    df = create_sample_crypto_data(2000)  # Más datos para simular meses
-    
-    # Preparar features y target
-    feature_cols = ['price', 'volume', 'rsi', 'ma_20', 'ma_50', 'volatility_20', 'returns']
-    target_col = 'target'
-    
-    # Inicializar walk-forward validator con parámetros correctos
-    validator = WalkForwardValidator(
-        initial_train_months=3,    # 3 meses iniciales
-        test_months=1,             # 1 mes de test
-        retrain_frequency_months=1, # Retrain cada mes
-        min_train_samples=100      # Mínimo 100 muestras
-    )
-    
-    # Ejecutar validación simplificada (sin parámetros extra)
+    Args:
+        n_samples: Número de muestras a generar
+        
+    Returns:
+        pd.DataFrame: Dataset simple con features y target
+    """
     try:
-        results = validator.validate(
-            df=df,
-            model_class=RegularizedXGBoost,
-            model_params={'task_type': 'momentum'}
+        np.random.seed(42)
+        logger.info(f"Generando {n_samples} muestras de datos simples")
+        
+        # Crear datos básicos con tipos explícitos
+        timestamps = pd.date_range(start='2023-01-01', periods=n_samples, freq='5T')
+        
+        # Precio base simple sin volatilidad compleja
+        price_trend = np.linspace(50000, 55000, n_samples)
+        noise = np.random.normal(0, 500, n_samples)
+        price = price_trend + noise
+        
+        # Crear DataFrame con tipos explícitos
+        data = pd.DataFrame({
+            'timestamp': timestamps,
+            'price': price.astype(float),
+            'volume': np.random.exponential(1000, n_samples).astype(float),
+        })
+        
+        # Features técnicos simples usando .astype() explícito
+        data['ma_5'] = data['price'].rolling(window=5, min_periods=1).mean().astype(float)
+        data['ma_20'] = data['price'].rolling(window=20, min_periods=1).mean().astype(float)
+        
+        # Returns simple
+        data['returns'] = data['price'].pct_change().fillna(0).astype(float)
+        
+        # Volatilidad simple
+        data['volatility'] = data['price'].rolling(window=10, min_periods=1).std().fillna(0).astype(float)
+        
+        # RSI simplificado usando numpy arrays directamente
+        delta = data['price'].diff().fillna(0)
+        delta_np = np.array(delta)  # Conversión explícita a numpy
+        gain = np.where(delta_np > 0, delta_np, 0)
+        loss = np.where(delta_np < 0, -delta_np, 0)
+        
+        avg_gain = pd.Series(gain).rolling(window=14, min_periods=1).mean()
+        avg_loss = pd.Series(loss).rolling(window=14, min_periods=1).mean()
+        
+        rs = avg_gain / (avg_loss + 1e-8)
+        data['rsi'] = (100 - (100 / (1 + rs))).astype(float)
+        
+        # Target simple: 1 si precio sube en próximo período, 0 si baja
+        future_price = data['price'].shift(-1)
+        data['target'] = (future_price > data['price']).astype(int)
+        
+        # Rellenar NaNs usando método moderno
+        data = data.ffill().fillna(0)
+        
+        # Eliminar última fila con target NaN
+        data = data.dropna(subset=['target'])
+        
+        # Establecer índice de timestamp
+        data.set_index('timestamp', inplace=True)
+        
+        logger.info(f"✅ Dataset creado: {data.shape}")
+        logger.info(f"Columnas: {list(data.columns)}")
+        logger.info(f"Target distribution: {data['target'].value_counts().to_dict()}")
+        
+        return data
+        
+    except Exception as e:
+        logger.error(f"Error creando dataset: {e}")
+        raise
+
+def test_walk_forward_validator(data: pd.DataFrame) -> bool:
+    """
+    Probar WalkForwardValidator con la interfaz real.
+    
+    Args:
+        data: DataFrame con timestamp como índice
+        
+    Returns:
+        bool: True si el test fue exitoso
+    """
+    try:
+        logger.info("\n🔍 Probando WalkForwardValidator...")
+        
+        from validation.walk_forward_validator import WalkForwardValidator
+        from models.regularized_models import RegularizedXGBoost
+        
+        # Crear validador con parámetros conservadores
+        validator = WalkForwardValidator(
+            initial_train_months=1,  # Solo 1 mes inicial
+            test_months=1,           # 1 mes de test
+            retrain_frequency_months=1,  # Reentrenar cada mes
+            min_train_samples=50     # Mínimo 50 samples
         )
         
-        logger.info(f"Walk-forward completado: {len(results)} ventanas validadas")
+        # Crear modelo XGBoost
+        model_class = RegularizedXGBoost
+        model_params = {'task_type': 'momentum'}
         
-        if results:
-            # Estadísticas promedio usando model_performance
-            train_scores = [r.model_performance.get('train_score', 0) for r in results]
-            val_scores = [r.model_performance.get('val_score', 0) for r in results]
+        # Ejecutar validación con interfaz real
+        results = validator.validate(
+            df=data,
+            model_class=model_class,
+            model_params=model_params
+        )
+        
+        if results and len(results) > 0:
+            logger.info(f"✅ WalkForwardValidator: {len(results)} períodos completados")
+            for i, result in enumerate(results[:3]):  # Mostrar primeros 3
+                logger.info(f"   Período {i+1}: train={result.train_size}, test={result.test_size}")
+            return True
+        else:
+            logger.warning("⚠️ WalkForwardValidator: Sin resultados")
+            return False
             
-            if train_scores and val_scores:
-                logger.info(f"Score promedio train: {np.mean(train_scores):.4f} ± {np.std(train_scores):.4f}")
-                logger.info(f"Score promedio val: {np.mean(val_scores):.4f} ± {np.std(val_scores):.4f}")
-                logger.info(f"Gap promedio: {np.mean(train_scores) - np.mean(val_scores):.4f}")
     except Exception as e:
-        logger.error(f"Error en walk-forward validation: {e}")
+        logger.error(f"❌ Error en WalkForwardValidator: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
 
-def demo_overfitting_detection():
-    """Demostrar detección automática de overfitting."""
-    logger.info("\n=== DEMO: Detección de Overfitting ===")
+def test_regularized_models(data: pd.DataFrame) -> bool:
+    """
+    Probar modelos regularizados con datos simples.
     
-    from validation import OverfittingDetector
-    from models import RegularizedXGBoost, RegularizedEnsemble
-    
-    # Crear datos de prueba
-    df = create_sample_crypto_data(800)
-    
-    feature_cols = ['price', 'volume', 'rsi', 'ma_20', 'ma_50', 'volatility_20', 'returns']
-    target_col = 'target'
-    
-    # Split temporal para validación
-    split_idx = int(0.7 * len(df))
-    
-    X_train = df[feature_cols].iloc[:split_idx]
-    y_train = df[target_col].iloc[:split_idx]
-    X_val = df[feature_cols].iloc[split_idx:]
-    y_val = df[target_col].iloc[split_idx:]
-    
-    # Crear modelos con diferentes niveles de regularización
-    models = {}
-    
-    # Modelo 1: Alta regularización (poco overfitting)
-    model_high_reg = RegularizedXGBoost('momentum')
-    model_high_reg.fit(X_train, y_train)  # CORRECCIÓN: Solo X y y
-    models['XGB_Alta_Regularización'] = model_high_reg
-    
-    # Modelo 2: Ensemble regularizado
-    model_ensemble = RegularizedEnsemble('momentum')
-    model_ensemble.fit(X_train, y_train)  # CORRECCIÓN: Solo X y y
-    models['Ensemble_Regularizado'] = model_ensemble
-    
-    # Inicializar detector
-    detector = OverfittingDetector()
-    
-    # Análisis batch de todos los modelos
-    comparison_df = detector.batch_analysis(
-        models=models,
-        X_train=np.array(X_train), 
-        y_train=np.array(y_train),
-        X_val=np.array(X_val),
-        y_val=np.array(y_val)
-    )
-    
-    logger.info("\n📊 Comparación de Modelos:")
-    logger.info(comparison_df.to_string(index=False))
-    
-    # Análisis detallado del mejor modelo
-    best_model_name = comparison_df.iloc[0]['model']
-    best_model = models[best_model_name]
-    
-    report = detector.detect(
-        best_model, np.array(X_train), np.array(y_train), 
-        np.array(X_val), np.array(y_val), best_model_name
-    )
-    
-    logger.info(f"\n🔍 Análisis detallado de {best_model_name}:")
-    logger.info(f"Nivel de overfitting: {report.level.value.upper()}")
-    logger.info(f"Score de overfitting: {report.score:.4f}")
-    logger.info(f"Gap train-val: {report.gap:.4f}")
-    
-    if report.warnings:
-        logger.info("⚠️ Advertencias:")
-        for warning in report.warnings:
-            logger.info(f"  - {warning}")
-    
-    if report.recommendations:
-        logger.info("💡 Recomendaciones:")
-        for rec in report.recommendations:
-            logger.info(f"  - {rec}")
+    Args:
+        data: DataFrame con features y target
+        
+    Returns:
+        bool: True si el test fue exitoso
+    """
+    try:
+        logger.info("\n🔍 Probando Modelos Regularizados...")
+        
+        from models.regularized_models import RegularizedXGBoost
+        
+        # Preparar datos
+        feature_cols = [col for col in data.columns if col not in ['target']]
+        X = data[feature_cols].values
+        y = data['target'].values
+        
+        logger.info(f"Features: {feature_cols}")
+        logger.info(f"Datos: X={X.shape}, y={y.shape}")
+        
+        # Split simple train/test
+        split_idx = int(len(X) * 0.7)
+        X_train = X[:split_idx]
+        X_test = X[split_idx:]
+        y_train = y[:split_idx]
+        y_test = y[split_idx:]
+        
+        # Crear y entrenar modelo
+        model = RegularizedXGBoost(task_type='momentum')
+        
+        # Fit con eval_set
+        model.fit(
+            X_train=X_train,
+            y_train=y_train,
+            eval_set=[(X_test, y_test)]
+        )
+        
+        # Hacer predicciones
+        predictions = model.predict(X_test)
+        score = model.score(X_test, y_test)
+        
+        logger.info(f"✅ RegularizedXGBoost entrenado exitosamente")
+        logger.info(f"   Score: {score:.4f}")
+        logger.info(f"   Predicciones shape: {predictions.shape}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Error en modelos regularizados: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
 
-def demo_complete_pipeline():
-    """Demostrar pipeline completo anti-overfitting."""
-    logger.info("\n=== DEMO: Pipeline Completo Anti-Overfitting ===")
+def test_overfitting_detector(data: pd.DataFrame) -> bool:
+    """
+    Probar detector de overfitting con datos simples.
     
-    from validation import TemporalValidator, WalkForwardValidator, OverfittingDetector
-    from models import RegularizedEnsemble
+    Args:
+        data: DataFrame con features y target
+        
+    Returns:
+        bool: True si el test fue exitoso
+    """
+    try:
+        logger.info("\n🔍 Probando OverfittingDetector...")
+        
+        from validation.overfitting_detector import OverfittingDetector
+        from models.regularized_models import RegularizedXGBoost
+        
+        # Preparar datos
+        feature_cols = [col for col in data.columns if col not in ['target']]
+        X = data[feature_cols]  # Mantener como DataFrame
+        y = data['target']      # Mantener como Series
+        
+        # Split simple
+        split_idx = int(len(X) * 0.7)
+        X_train = X.iloc[:split_idx]
+        X_test = X.iloc[split_idx:]
+        y_train = y.iloc[:split_idx]
+        y_test = y.iloc[split_idx:]
+        
+        # Entrenar modelo
+        model = RegularizedXGBoost(task_type='momentum')
+        model.fit(X_train.values, y_train.values)
+        
+        # Crear detector
+        detector = OverfittingDetector()
+        
+        # Analizar overfitting
+        report = detector.detect(
+            model=model,
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_test,
+            y_val=y_test,
+            model_name="Test_XGBoost"
+        )
+        
+        logger.info(f"✅ OverfittingDetector completado:")
+        logger.info(f"   Nivel: {report.level.value.upper()}")
+        logger.info(f"   Score overfitting: {report.score:.3f}")
+        logger.info(f"   Gap train-val: {report.gap:.3f}")
+        logger.info(f"   Advertencias: {len(report.warnings)}")
+        
+        if report.warnings:
+            logger.info("   Primeras advertencias:")
+            for i, warning in enumerate(report.warnings[:2], 1):
+                logger.info(f"     {i}. {warning}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Error en OverfittingDetector: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+def run_simplified_demo() -> bool:
+    """
+    Ejecutar demo simplificado que realmente funciona.
     
-    # 1. Datos de entrada
-    df = create_sample_crypto_data(1200)
-    feature_cols = ['price', 'volume', 'rsi', 'ma_20', 'ma_50', 'volatility_20', 'returns']
-    target_col = 'target'
-    
-    logger.info("1️⃣ Datos creados: 1200 muestras de crypto simuladas")
-    
-    # 2. Validación temporal inicial
-    temporal_validator = TemporalValidator(train_ratio=0.6, val_ratio=0.2, test_ratio=0.2)
-    train_data, val_data, test_data = temporal_validator.temporal_split(df)
-    
-    logger.info(f"2️⃣ Split temporal: Train={len(train_data)}, Val={len(val_data)}, Test={len(test_data)}")
-    
-    # 3. Walk-forward validation en el conjunto de entrenamiento
-    wf_validator = WalkForwardValidator(initial_train_months=2, test_months=1)
-    wf_results = wf_validator.validate(
-        train_data, RegularizedEnsemble, {'task_type': 'momentum'}
-    )
-    
-    logger.info(f"3️⃣ Walk-forward completado: {len(wf_results)} ventanas validadas")
-    
-    # 4. Entrenar modelo final en train completo
-    X_train = train_data[feature_cols]
-    y_train = train_data[target_col]
-    X_val = val_data[feature_cols]
-    y_val = val_data[target_col]
-    
-    final_model = RegularizedEnsemble('momentum')
-    final_model.fit(X_train, y_train)  # CORRECCIÓN: Solo X y y
-    
-    logger.info("4️⃣ Modelo final entrenado con máxima regularización")
-    
-    # 5. Detección final de overfitting
-    detector = OverfittingDetector()
-    final_report = detector.detect(
-        final_model, np.array(X_train), np.array(y_train),
-        np.array(X_val), np.array(y_val), "Modelo_Final_Ensemble"
-    )
-    
-    logger.info(f"5️⃣ Overfitting final: {final_report.level.value.upper()} (score: {final_report.score:.4f})")
-    
-    # 6. Evaluación en test set (datos nunca vistos)
-    X_test = test_data[feature_cols]
-    y_test = test_data[target_col]
-    
-    test_predictions = final_model.predict(X_test)
-    test_score = np.corrcoef(y_test, test_predictions)[0, 1] ** 2  # R² manual
-    
-    logger.info(f"6️⃣ Score en test set (nunca visto): {test_score:.4f}")
-    
-    # 7. Resumen final
-    logger.info("\n📈 RESUMEN DEL PIPELINE:")
-    logger.info(f"✅ Validación temporal: Sin data leakage")
-    logger.info(f"✅ Walk-forward: {len(wf_results)} ventanas validadas")
-    logger.info(f"✅ Modelo final: {len(final_model.models)} sub-modelos en ensemble")
-    logger.info(f"✅ Overfitting: {final_report.level.value.upper()} ({final_report.score:.4f})")
-    logger.info(f"✅ Performance test: {test_score:.4f}")
-    
-    if final_report.level.value in ['none', 'low']:
-        logger.info("🎉 ¡MODELO LISTO PARA PRODUCCIÓN!")
-    else:
-        logger.info("⚠️ Modelo necesita más regularización antes de producción")
+    Returns:
+        bool: True si la demo fue exitosa
+    """
+    try:
+        logger.info("="*70)
+        logger.info("🚀 DEMO SIMPLIFICADO SISTEMA ANTI-OVERFITTING NVBOT3")
+        logger.info("="*70)
+        
+        # 1. Crear datos simples
+        logger.info("\n1️⃣ Creando datos de prueba simples...")
+        data = create_simple_test_data(n_samples=1000)
+        
+        if data.empty:
+            raise ValueError("No se pudieron crear datos de prueba")
+        
+        logger.info(f"✅ Datos creados: {data.shape}")
+        
+        # 2. Test individual de módulos
+        success_count = 0
+        total_tests = 3
+        
+        # Test WalkForwardValidator
+        if test_walk_forward_validator(data):
+            success_count += 1
+        
+        # Test RegularizedModels
+        if test_regularized_models(data):
+            success_count += 1
+        
+        # Test OverfittingDetector
+        if test_overfitting_detector(data):
+            success_count += 1
+        
+        # 3. Resumen final
+        logger.info("\n📊 RESUMEN FINAL:")
+        logger.info("="*50)
+        logger.info(f"Tests exitosos: {success_count}/{total_tests}")
+        
+        if success_count == total_tests:
+            logger.info("✅ WalkForwardValidator funcionando")
+            logger.info("✅ RegularizedModels operativos")
+            logger.info("✅ OverfittingDetector funcional")
+            logger.info("="*50)
+            logger.info("🎉 DEMO COMPLETADA EXITOSAMENTE")
+            logger.info("Sistema anti-overfitting NvBot3 operativo!")
+            return True
+        else:
+            logger.warning(f"⚠️ Solo {success_count}/{total_tests} tests exitosos")
+            logger.warning("Sistema parcialmente funcional")
+            return False
+        
+    except Exception as e:
+        logger.error(f"❌ Error crítico en demo: {e}")
+        import traceback
+        logger.error(f"Traceback completo: {traceback.format_exc()}")
+        return False
+
+def main():
+    """
+    Función principal para ejecutar la demo.
+    """
+    try:
+        # Verificar entorno virtual
+        if not hasattr(sys, 'real_prefix') and not (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+            logger.warning("⚠️ No se detectó entorno virtual activo")
+            logger.warning("   Recomendado: activar nvbot3_env antes de ejecutar")
+        else:
+            logger.info("✅ Entorno virtual detectado")
+        
+        # Ejecutar demo simplificado
+        success = run_simplified_demo()
+        
+        if success:
+            logger.info("\n🚀 Demo ejecutada exitosamente!")
+            logger.info("El sistema anti-overfitting está funcionando.")
+            return 0
+        else:
+            logger.error("\n❌ Demo con errores - revisar logs para detalles")
+            return 1
+            
+    except KeyboardInterrupt:
+        logger.info("\n⏹️ Demo interrumpida por usuario")
+        return 1
+    except Exception as e:
+        logger.error(f"\n💥 Error fatal en main: {e}")
+        return 1
 
 if __name__ == "__main__":
-    logger.info("🚀 Iniciando demo completo del sistema anti-overfitting NvBot3")
-    
-    try:
-        # Ejecutar todas las demos
-        demo_temporal_validation()
-        demo_walk_forward_validation() 
-        demo_overfitting_detection()
-        demo_complete_pipeline()
-        
-        logger.info("\n✅ ¡Demo completo terminado exitosamente!")
-        logger.info("🎯 Todos los módulos anti-overfitting están funcionando correctamente")
-        
-    except Exception as e:
-        logger.error(f"❌ Error en demo: {e}")
-        import traceback
-        traceback.print_exc()
+    sys.exit(main())
