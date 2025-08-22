@@ -8,7 +8,7 @@ dependencias funcionan apropiadamente.
 
 Uso:
     # Primero activar el entorno virtual
-    nvbot3_env\Scripts\activate
+    nvbot3_env\\Scripts\\activate
     # Luego ejecutar validación
     python scripts/validate_setup.py
 

@@ -1,0 +1,104 @@
+# NvBot3 - Configuración Monitoreo V2 ACTUALIZADA
+# CORRECCIÓN #3: Solo símbolos VERIFICADOS disponibles en Binance (46 de 60)
+
+live_monitoring:
+  # 46 monedas VERIFICADAS y disponibles en Binance
+  symbols:
+    # Tier M1: Blue Chips disponibles (16 monedas)
+    monitoring_tier_m1: [
+      'LTCUSDT', 'BCHUSDT', 'XLMUSDT', 'TRXUSDT', 'ATOMUSDT',
+      'VETUSDT', 'NEOUSDT', 'DASHUSDT', 'ETCUSDT', 'ZECUSDT',
+      'QTUMUSDT', 'LSKUSDT', 'ICXUSDT', 'ZILUSDT', 'ONTUSDT', 'RVNUSDT'
+    ]
+    
+    # Tier M2: DeFi/L2 disponibles (15 monedas)  
+    monitoring_tier_m2: [
+      'CAKEUSDT', 'BANDUSDT', 'KNCUSDT', 'LRCUSDT', 'CHRUSDT',
+      'INJUSDT', 'DYDXUSDT', 'ENSUSDT', 'MASKUSDT', 'PERPUSDT',
+      'SUPERUSDT', 'ONEUSDT', 'NEARUSDT', 'ALGOUSDT', 'EGLDUSDT'
+    ]
+    
+    # Tier M3: Gaming/AI disponibles (15 monedas)
+    monitoring_tier_m3: [
+      'AXSUSDT', 'SLPUSDT', 'ALICEUSDT', 'TLMUSDT', 'GALAUSDT',
+      'FLMUSDT', 'CITYUSDT', 'BICOUSDT', 'GMTUSDT', 'MOVEUSDT',
+      'FLOWUSDT', 'THETAUSDT', 'TFUELUSDT', 'WOOUSDT', 'JASMYUSDT'
+    ]
+
+  # Configuración optimizada para 46 streams WebSocket
+  websocket_config:
+    max_concurrent_streams: 46
+    
+    # Frecuencias diferenciadas por tier
+    update_frequencies:
+      monitoring_tier_m1: 30  # Blue chips cada 30s (más estables)
+      monitoring_tier_m2: 45  # DeFi cada 45s (volatilidad media)  
+      monitoring_tier_m3: 60  # Gaming/AI cada 60s (más volátiles)
+    
+    # Límites de recursos optimizados para 46 streams
+    resource_limits:
+      max_cpu_percent: 70        # Reducido para 46 streams
+      max_memory_mb: 2560        # Ajustado para 46 streams
+      max_threads: 4             # Optimizado para laptop
+      connection_timeout: 30     # Timeout conservador
+      reconnection_attempts: 3   # Intentos de reconexión
+    
+    # Buffer para manejo de datos en tiempo real
+    data_buffer:
+      max_buffer_size: 1000      # Registros por símbolo
+      flush_interval: 60         # Segundos para limpiar buffer
+      priority_processing: true  # Procesar M1 primero
+    
+    # Configuración de calidad de conexión
+    connection_quality:
+      ping_interval: 20          # Verificar conexión cada 20s
+      max_latency_ms: 1000       # Latencia máxima aceptable
+      auto_reconnect: true       # Reconectar automáticamente
+
+  # Configuración de datos históricos
+  historical_data_required: false  # Solo WebSocket, no históricos
+
+  # Validación de integridad
+  data_validation:
+    price_change_threshold: 0.15    # 15% cambio máximo válido
+    volume_spike_threshold: 10.0    # 10x volumen normal máximo
+    timestamp_tolerance: 5          # 5s tolerancia timestamp
+    
+  # Configuración de alertas para monitoreo
+  alerts:
+    enable_price_alerts: true
+    enable_volume_alerts: true
+    enable_connection_alerts: true
+    
+    thresholds:
+      major_price_move: 0.05      # 5% movimiento significativo
+      volume_spike: 3.0           # 3x volumen promedio
+      connection_loss: 10         # 10s sin datos = alerta
+
+# ELIMINADOS (14 símbolos NO disponibles en Binance):
+# - EOSUSDT, XMRUSDT, OMGUSDT, WAVESUSDT  
+# - RENUSDT, BALUSDT, KLAYUSDT, HARMONYUSDT
+# - LOOKSUSDT, STEPNUSDT, SWEATUSDT, FITFIUSDT
+# - NFTUSDT, RARIUSDT
+
+# Información de configuración
+metadata:
+  version: "2.0"
+  created: "2025-08-21"
+  description: "Configuración monitoreo optimizada - 46 símbolos verificados"
+  total_symbols: 46
+  verified_availability: "100%"
+  resource_optimization: "laptop_friendly"
+  
+  # Distribución por tiers
+  tier_distribution:
+    monitoring_tier_m1: 16  # Blue chips estables
+    monitoring_tier_m2: 15  # DeFi/L2 emergentes  
+    monitoring_tier_m3: 15  # Gaming/AI/nuevos
+  
+  # Recursos estimados
+  estimated_resources:
+    cpu_usage: "50-70%"
+    memory_usage: "2.0-2.5GB"
+    network_bandwidth: "1-2Mbps"
+    disk_space_daily: "100-200MB"

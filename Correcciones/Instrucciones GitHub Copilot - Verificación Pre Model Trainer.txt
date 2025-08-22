@@ -1,0 +1,653 @@
+# 🔍 Instrucciones GitHub Copilot - Verificación Pre Model Trainer (ESTRATEGIA DUAL)
+
+## 🎯 OBJETIVO CRÍTICO ACTUALIZADO
+Implementar **estrategia dual** para evitar overfitting específico a símbolos:
+- **30 monedas para ENTRENAMIENTO** (requieren datos históricos)
+- **60 monedas DIFERENTES para MONITOREO** (solo WebSocket en vivo)
+
+---
+
+## 📋 ESTRATEGIA DUAL COMPLETA
+
+### **📚 30 Monedas ENTRENAMIENTO (Datos históricos requeridos)**
+```yaml
+# config/training_config.yaml
+training_data:
+  symbols:
+    # Tier 1: Blue Chips para entrenamiento (10)
+    tier_1: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT', 
+             'XRPUSDT', 'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'AVAXUSDT']
+    
+    # Tier 2: DeFi para entrenamiento (10)  
+    tier_2: ['UNIUSDT', 'AAVEUSDT', 'MKRUSDT', 'SUSHIUSDT', 'COMPUSDT',
+             'YFIUSDT', 'SNXUSDT', 'CRVUSDT', '1INCHUSDT', 'ALPHAUSDT']
+    
+    # Tier 3: Emerging para entrenamiento (10)
+    tier_3: ['SANDUSDT', 'MANAUSDT', 'ENJUSDT', 'CHZUSDT', 'BATUSDT',
+             'ZRXUSDT', 'STORJUSDT', 'OCEANUSDT', 'FETUSDT', 'IOTAUSDT']
+  
+  timeframes: ['5m', '15m', '1h', '4h', '1d']
+  start_date: '2022-01-01'
+  historical_data_required: true
+```
+
+### **📡 60 Monedas MONITOREO (Solo WebSocket en vivo)**
+```yaml
+# config/monitoring_config.yaml
+live_monitoring:
+  symbols:
+    # Tier M1: Blue Chips diferentes para monitoreo (20)
+    monitoring_tier_m1: [
+      'LTCUSDT', 'BCHUSDT', 'XLMUSDT', 'TRXUSDT', 'EOSUSDT',
+      'ATOMUSDT', 'VETUSDT', 'NEOUSDT', 'DASHUSDT', 'ETCUSDT',
+      'XMRUSDT', 'ZECUSDT', 'QTUMUSDT', 'OMGUSDT', 'LSKUSDT',
+      'WAVESUSDT', 'ICXUSDT', 'ZILUSDT', 'ONTUSDT', 'RVNUSDT'
+    ]
+    
+    # Tier M2: DeFi/L2 diferentes para monitoreo (20)
+    monitoring_tier_m2: [
+      'CAKEUSDT', 'BANDUSDT', 'KNCUSDT', 'LRCUSDT', 'RENUSDT',
+      'BALUSDT', 'CHRUSDT', 'INJUSDT', 'DYDXUSDT', 'ENSUSDT',
+      'MASKUSDT', 'PERPUSDT', 'RARIUSDT', 'SUPERUSDT', 'KLAYUSDT',
+      'ONEUSDT', 'HARMONYUSDT', 'NEARUSDT', 'ALGOUSDT', 'EGLDUSDT'
+    ]
+    
+    # Tier M3: Gaming/AI/Metaverse diferentes para monitoreo (20)
+    monitoring_tier_m3: [
+      'AXSUSDT', 'SLPUSDT', 'ALICEUSDT', 'TLMUSDT', 'GALAUSDT',
+      'FLMUSDT', 'CITYUSDT', 'LOOKSUSDT', 'BICOUSDT', 'GMTUSDT',
+      'STEPNUSDT', 'SWEATUSDT', 'FITFIUSDT', 'MOVEUSDT', 'NFTUSDT',
+      'FLOWUSDT', 'THETAUSDT', 'TFUELUSDT', 'WOOUSDT', 'JASMYUSDT'
+    ]
+  
+  websocket_config:
+    max_concurrent_streams: 60
+    update_frequencies:
+      monitoring_tier_m1: 30  # segundos
+      monitoring_tier_m2: 45  # segundos  
+      monitoring_tier_m3: 60  # segundos
+    resource_limits:
+      max_cpu_percent: 75
+      max_memory_mb: 3072
+  
+  historical_data_required: false  # Solo WebSocket en vivo
+```
+
+---
+
+## 🔧 **PASO 1: Verificador Dual de Datos**
+
+**Archivo:** `scripts/verify_dual_strategy_data.py`
+
+```python
+"""
+Verificador dual: 30 monedas entrenamiento + 60 monedas monitoreo.
+Solo verifica datos históricos para las 30 de entrenamiento.
+"""
+
+import os
+import yaml
+import pandas as pd
+import requests
+from datetime import datetime, timedelta
+import logging
+from pathlib import Path
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+class DualStrategyVerifier:
+    def __init__(self):
+        self.training_config_path = 'config/training_config.yaml'
+        self.monitoring_config_path = 'config/monitoring_config.yaml'
+        self.data_dir = Path('data/raw')
+        
+        # Resultados de verificación
+        self.training_symbols = []
+        self.monitoring_symbols = []
+        self.missing_training_files = []
+        self.corrupted_training_files = []
+        self.unavailable_monitoring_symbols = []
+        
+    def load_configs(self):
+        """Cargar ambas configuraciones."""
+        try:
+            # Configuración de entrenamiento
+            with open(self.training_config_path, 'r') as f:
+                training_config = yaml.safe_load(f)
+            
+            training_symbols = []
+            training_symbols.extend(training_config['training_data']['symbols']['tier_1'])
+            training_symbols.extend(training_config['training_data']['symbols']['tier_2'])
+            training_symbols.extend(training_config['training_data']['symbols']['tier_3'])
+            
+            timeframes = training_config['training_data']['timeframes']
+            
+            # Configuración de monitoreo
+            with open(self.monitoring_config_path, 'r') as f:
+                monitoring_config = yaml.safe_load(f)
+            
+            monitoring_symbols = []
+            monitoring_symbols.extend(monitoring_config['live_monitoring']['symbols']['monitoring_tier_m1'])
+            monitoring_symbols.extend(monitoring_config['live_monitoring']['symbols']['monitoring_tier_m2'])
+            monitoring_symbols.extend(monitoring_config['live_monitoring']['symbols']['monitoring_tier_m3'])
+            
+            logger.info(f"✅ Configuraciones cargadas:")
+            logger.info(f"   📚 Entrenamiento: {len(training_symbols)} monedas × {len(timeframes)} timeframes")
+            logger.info(f"   📡 Monitoreo: {len(monitoring_symbols)} monedas (solo WebSocket)")
+            
+            return training_symbols, timeframes, monitoring_symbols
+            
+        except Exception as e:
+            logger.error(f"❌ Error cargando configuraciones: {e}")
+            return None, None, None
+    
+    def verify_training_data_files(self, symbols, timeframes):
+        """Verificar archivos de datos históricos para entrenamiento."""
+        logger.info("🔍 Verificando datos históricos para entrenamiento...")
+        
+        required_files = []
+        for symbol in symbols:
+            for timeframe in timeframes:
+                required_files.append(f"{symbol}_{timeframe}.csv")
+        
+        verified_files = 0
+        self.missing_training_files = []
+        self.corrupted_training_files = []
+        
+        for i, filename in enumerate(required_files, 1):
+            file_path = self.data_dir / filename
+            
+            if not file_path.exists():
+                self.missing_training_files.append(filename)
+                logger.error(f"❌ [{i}/{len(required_files)}] {filename}: Archivo no existe")
+                continue
+            
+            try:
+                df = pd.read_csv(file_path)
+                
+                # Verificaciones de calidad
+                if len(df) < 1000:
+                    self.corrupted_training_files.append(filename)
+                    logger.error(f"❌ [{i}/{len(required_files)}] {filename}: Muy pocos datos ({len(df)})")
+                    continue
+                
+                required_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                missing_cols = [col for col in required_columns if col not in df.columns]
+                if missing_cols:
+                    self.corrupted_training_files.append(filename)
+                    logger.error(f"❌ [{i}/{len(required_files)}] {filename}: Columnas faltantes: {missing_cols}")
+                    continue
+                
+                # Verificar datos recientes
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                latest_date = df['timestamp'].max()
+                cutoff_date = datetime.now() - timedelta(days=30)
+                
+                if latest_date < cutoff_date:
+                    self.corrupted_training_files.append(filename)
+                    logger.error(f"❌ [{i}/{len(required_files)}] {filename}: Datos obsoletos ({latest_date.date()})")
+                    continue
+                
+                verified_files += 1
+                logger.info(f"✅ [{i}/{len(required_files)}] {filename}: OK - {len(df)} registros hasta {latest_date.date()}")
+                
+            except Exception as e:
+                self.corrupted_training_files.append(filename)
+                logger.error(f"❌ [{i}/{len(required_files)}] {filename}: Error leyendo - {e}")
+        
+        return verified_files, len(required_files)
+    
+    def verify_monitoring_symbols_availability(self, symbols):
+        """Verificar que monedas de monitoreo estén disponibles en Binance."""
+        logger.info("🔍 Verificando disponibilidad de símbolos para monitoreo...")
+        
+        try:
+            # Obtener lista de símbolos disponibles en Binance
+            response = requests.get('https://api.binance.com/api/v3/exchangeInfo')
+            binance_symbols = {s['symbol'] for s in response.json()['symbols'] if s['status'] == 'TRADING'}
+            
+            available_symbols = 0
+            self.unavailable_monitoring_symbols = []
+            
+            for i, symbol in enumerate(symbols, 1):
+                if symbol in binance_symbols:
+                    available_symbols += 1
+                    logger.info(f"✅ [{i}/{len(symbols)}] {symbol}: Disponible en Binance")
+                else:
+                    self.unavailable_monitoring_symbols.append(symbol)
+                    logger.error(f"❌ [{i}/{len(symbols)}] {symbol}: NO disponible en Binance")
+            
+            return available_symbols, len(symbols)
+            
+        except Exception as e:
+            logger.error(f"❌ Error verificando disponibilidad Binance: {e}")
+            return 0, len(symbols)
+    
+    def run_dual_verification(self):
+        """Ejecutar verificación completa dual."""
+        logger.info("🚀 INICIANDO VERIFICACIÓN DUAL STRATEGY")
+        logger.info("="*60)
+        
+        # 1. Cargar configuraciones
+        training_symbols, timeframes, monitoring_symbols = self.load_configs()
+        if not training_symbols:
+            return False
+        
+        # 2. Verificar datos históricos para entrenamiento
+        training_verified, training_total = self.verify_training_data_files(training_symbols, timeframes)
+        
+        # 3. Verificar disponibilidad de símbolos para monitoreo
+        monitoring_available, monitoring_total = self.verify_monitoring_symbols_availability(monitoring_symbols)
+        
+        # 4. Generar reporte final
+        self.generate_dual_strategy_report(
+            training_symbols, monitoring_symbols, timeframes,
+            training_verified, training_total,
+            monitoring_available, monitoring_total
+        )
+        
+        # Éxito si todos los datos de entrenamiento están listos y al menos 90% de monitoreo disponible
+        training_success = len(self.missing_training_files) == 0 and len(self.corrupted_training_files) == 0
+        monitoring_success = (monitoring_available / monitoring_total) >= 0.9
+        
+        return training_success and monitoring_success
+    
+    def generate_dual_strategy_report(self, training_symbols, monitoring_symbols, timeframes,
+                                    training_verified, training_total,
+                                    monitoring_available, monitoring_total):
+        """Generar reporte detallado de verificación dual."""
+        logger.info("\n" + "="*70)
+        logger.info("📊 REPORTE VERIFICACIÓN DUAL STRATEGY")
+        logger.info("="*70)
+        
+        logger.info(f"🎯 CONFIGURACIÓN DUAL:")
+        logger.info(f"   📚 Entrenamiento: {len(training_symbols)} monedas × {len(timeframes)} timeframes")
+        logger.info(f"   📡 Monitoreo: {len(monitoring_symbols)} monedas (solo WebSocket)")
+        
+        logger.info(f"\n📈 RESULTADOS ENTRENAMIENTO (datos históricos):")
+        logger.info(f"   ✅ Archivos válidos: {training_verified}/{training_total} ({training_verified/training_total*100:.1f}%)")
+        logger.info(f"   ❌ Archivos faltantes: {len(self.missing_training_files)}")
+        logger.info(f"   ⚠️ Archivos corruptos: {len(self.corrupted_training_files)}")
+        
+        logger.info(f"\n📡 RESULTADOS MONITOREO (WebSocket disponibilidad):")
+        logger.info(f"   ✅ Símbolos disponibles: {monitoring_available}/{monitoring_total} ({monitoring_available/monitoring_total*100:.1f}%)")
+        logger.info(f"   ❌ Símbolos no disponibles: {len(self.unavailable_monitoring_symbols)}")
+        
+        if self.missing_training_files:
+            logger.info(f"\n📋 Archivos entrenamiento faltantes:")
+            for file in self.missing_training_files[:10]:
+                logger.info(f"   • {file}")
+            if len(self.missing_training_files) > 10:
+                logger.info(f"   • ... y {len(self.missing_training_files) - 10} más")
+        
+        if self.unavailable_monitoring_symbols:
+            logger.info(f"\n⚠️ Símbolos monitoreo no disponibles:")
+            for symbol in self.unavailable_monitoring_symbols[:5]:
+                logger.info(f"   • {symbol}")
+        
+        # Estado final
+        training_ready = len(self.missing_training_files) == 0 and len(self.corrupted_training_files) == 0
+        monitoring_ready = (monitoring_available / monitoring_total) >= 0.9
+        
+        if training_ready and monitoring_ready:
+            logger.info(f"\n🎉 ¡DUAL STRATEGY VERIFICADA EXITOSAMENTE!")
+            logger.info(f"✅ Entrenamiento: {len(training_symbols)} monedas listas")
+            logger.info(f"✅ Monitoreo: {monitoring_available} monedas disponibles")
+            logger.info(f"🚀 Sistema listo para Model Trainer con estrategia dual")
+        else:
+            if not training_ready:
+                logger.info(f"\n⚠️ ENTRENAMIENTO: Faltan {training_total - training_verified} archivos")
+            if not monitoring_ready:
+                logger.info(f"\n⚠️ MONITOREO: Solo {monitoring_available}/{monitoring_total} símbolos disponibles")
+            logger.info(f"💡 Ejecutar descarga/corrección de datos faltantes")
+
+def main():
+    verifier = DualStrategyVerifier()
+    success = verifier.run_dual_verification()
+    
+    if success:
+        logger.info("✅ Verificación dual completa exitosa. Listo para Model Trainer.")
+        return 0
+    else:
+        logger.info("❌ Verificación dual fallida. Corregir datos antes de continuar.")
+        return 1
+
+if __name__ == "__main__":
+    exit(main())
+```
+
+---
+
+## 🔧 **PASO 2: Descargador Solo para Entrenamiento**
+
+**Archivo:** `scripts/download_training_data_only.py`
+
+```python
+"""
+Descarga inteligente SOLO para las 30 monedas de entrenamiento.
+Las 60 de monitoreo NO requieren datos históricos.
+"""
+
+import os
+import sys
+import yaml
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+
+from scripts.verify_dual_strategy_data import DualStrategyVerifier
+from scripts.download_historical_data import HistoricalDataDownloader
+import logging
+
+logger = logging.getLogger(__name__)
+
+class TrainingDataDownloader:
+    def __init__(self):
+        self.verifier = DualStrategyVerifier()
+        self.downloader = HistoricalDataDownloader()
+        
+    def download_missing_training_data_only(self):
+        """Descargar solo datos faltantes para entrenamiento."""
+        logger.info("🎯 INICIANDO DESCARGA PARA ENTRENAMIENTO (30 MONEDAS)")
+        
+        # 1. Verificar estado actual
+        success = self.verifier.run_dual_verification()
+        
+        if success:
+            logger.info("✅ Todos los datos de entrenamiento están completos.")
+            return True
+        
+        # 2. Obtener archivos de entrenamiento faltantes
+        training_files_to_download = self.verifier.missing_training_files + self.verifier.corrupted_training_files
+        
+        if not training_files_to_download:
+            logger.info("✅ No hay archivos de entrenamiento para descargar.")
+            return True
+        
+        logger.info(f"📥 Descargando {len(training_files_to_download)} archivos para entrenamiento...")
+        logger.info("💡 NOTA: Monedas de monitoreo NO requieren datos históricos")
+        
+        # 3. Descargar solo archivos de entrenamiento
+        for i, filename in enumerate(training_files_to_download, 1):
+            try:
+                symbol, timeframe_ext = filename.split('_', 1)
+                timeframe = timeframe_ext.replace('.csv', '')
+                
+                logger.info(f"📥 [{i}/{len(training_files_to_download)}] Descargando {symbol} {timeframe}...")
+                
+                self.downloader.download_symbol_timeframe(symbol, timeframe)
+                
+                logger.info(f"✅ [{i}/{len(training_files_to_download)}] Completado: {filename}")
+                
+            except Exception as e:
+                logger.error(f"❌ Error descargando {filename}: {e}")
+                continue
+        
+        # 4. Verificar nuevamente después de descarga
+        logger.info("\n🔍 Verificando datos después de descarga...")
+        final_success = self.verifier.run_dual_verification()
+        
+        if final_success:
+            logger.info("🎉 ¡DESCARGA COMPLETADA! Dual strategy lista.")
+            return True
+        else:
+            logger.error("⚠️ Algunos archivos de entrenamiento aún faltan.")
+            return False
+
+def main():
+    downloader = TrainingDataDownloader()
+    success = downloader.download_missing_training_data_only()
+    return 0 if success else 1
+
+if __name__ == "__main__":
+    exit(main())
+```
+
+---
+
+## 🔧 **PASO 3: Configuraciones Duales**
+
+### **Archivo:** `config/training_config.yaml` (ACTUALIZADO)
+```yaml
+# NvBot3 - Configuración SOLO para Entrenamiento
+
+training_data:
+  # 30 monedas EXCLUSIVAS para entrenamiento
+  symbols:
+    tier_1: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT', 
+             'XRPUSDT', 'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'AVAXUSDT']
+    
+    tier_2: ['UNIUSDT', 'AAVEUSDT', 'MKRUSDT', 'SUSHIUSDT', 'COMPUSDT',
+             'YFIUSDT', 'SNXUSDT', 'CRVUSDT', '1INCHUSDT', 'ALPHAUSDT']
+    
+    tier_3: ['SANDUSDT', 'MANAUSDT', 'ENJUSDT', 'CHZUSDT', 'BATUSDT',
+             'ZRXUSDT', 'STORJUSDT', 'OCEANUSDT', 'FETUSDT', 'IOTAUSDT']
+  
+  timeframes: ['5m', '15m', '1h', '4h', '1d']
+  start_date: '2022-01-01'
+  lookback_periods: 200
+
+# Configuración anti-overfitting (mantener existente)
+anti_overfitting:
+  validation:
+    method: "temporal_split"
+    train_ratio: 0.70
+    val_ratio: 0.15
+    test_ratio: 0.15
+    min_samples_per_split: 1000
+    
+    walk_forward:
+      enabled: true
+      initial_train_months: 6
+      test_months: 1
+      retrain_frequency_months: 1
+      min_train_samples: 5000
+```
+
+### **Archivo:** `config/monitoring_config.yaml` (NUEVO)
+```yaml
+# NvBot3 - Configuración SOLO para Monitoreo en Tiempo Real
+
+live_monitoring:
+  # 60 monedas DIFERENTES para monitoreo (nunca vistas en entrenamiento)
+  symbols:
+    monitoring_tier_m1: [
+      'LTCUSDT', 'BCHUSDT', 'XLMUSDT', 'TRXUSDT', 'EOSUSDT',
+      'ATOMUSDT', 'VETUSDT', 'NEOUSDT', 'DASHUSDT', 'ETCUSDT',
+      'XMRUSDT', 'ZECUSDT', 'QTUMUSDT', 'OMGUSDT', 'LSKUSDT',
+      'WAVESUSDT', 'ICXUSDT', 'ZILUSDT', 'ONTUSDT', 'RVNUSDT'
+    ]
+    
+    monitoring_tier_m2: [
+      'CAKEUSDT', 'BANDUSDT', 'KNCUSDT', 'LRCUSDT', 'RENUSDT',
+      'BALUSDT', 'CHRUSDT', 'INJUSDT', 'DYDXUSDT', 'ENSUSDT',
+      'MASKUSDT', 'PERPUSDT', 'RARIUSDT', 'SUPERUSDT', 'KLAYUSDT',
+      'ONEUSDT', 'HARMONYUSDT', 'NEARUSDT', 'ALGOUSDT', 'EGLDUSDT'
+    ]
+    
+    monitoring_tier_m3: [
+      'AXSUSDT', 'SLPUSDT', 'ALICEUSDT', 'TLMUSDT', 'GALAUSDT',
+      'FLMUSDT', 'CITYUSDT', 'LOOKSUSDT', 'BICOUSDT', 'GMTUSDT',
+      'STEPNUSDT', 'SWEATUSDT', 'FITFIUSDT', 'MOVEUSDT', 'NFTUSDT',
+      'FLOWUSDT', 'THETAUSDT', 'TFUELUSDT', 'WOOUSDT', 'JASMYUSDT'
+    ]
+
+  # Configuración de recursos para laptop
+  websocket_config:
+    max_concurrent_streams: 60
+    stream_buffer_size: 1000
+    reconnect_delay: 5
+    
+    # Frecuencias optimizadas por tier
+    update_frequencies:
+      monitoring_tier_m1: 30  # Blue chips cada 30s
+      monitoring_tier_m2: 45  # DeFi cada 45s  
+      monitoring_tier_m3: 60  # Gaming/AI cada 60s
+    
+    # Límites de recursos laptop
+    resource_limits:
+      max_cpu_percent: 75
+      max_memory_mb: 3072
+      max_threads: 4
+      batch_processing_size: 15
+
+  # Solo requiere WebSocket, NO datos históricos
+  historical_data_required: false
+```
+
+---
+
+## 🔧 **PASO 4: Script Maestro Dual**
+
+**Archivo:** `scripts/prepare_dual_strategy.py`
+
+```python
+"""
+Preparación completa para estrategia dual:
+- Verificar/descargar 30 monedas entrenamiento
+- Verificar disponibilidad 60 monedas monitoreo  
+- Confirmar readiness para Model Trainer
+"""
+
+import subprocess
+import sys
+import logging
+from pathlib import Path
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def run_command(command, description):
+    """Ejecutar comando y manejar errores."""
+    logger.info(f"🔄 {description}...")
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True, shell=True)
+        logger.info(f"✅ {description} completado exitosamente.")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"❌ {description} falló:")
+        logger.error(f"   Error: {e}")
+        if e.stdout:
+            logger.error(f"   Output: {e.stdout}")
+        if e.stderr:
+            logger.error(f"   Error Output: {e.stderr}")
+        return False
+
+def main():
+    logger.info("🚀 PREPARACIÓN DUAL STRATEGY PARA MODEL TRAINER")
+    logger.info("="*60)
+    logger.info("📚 30 monedas para entrenamiento (datos históricos)")
+    logger.info("📡 60 monedas DIFERENTES para monitoreo (WebSocket)")
+    logger.info("="*60)
+    
+    # 1. Verificar entorno virtual
+    if 'nvbot3_env' not in sys.executable:
+        logger.error("❌ Entorno virtual nvbot3_env no está activo!")
+        logger.error("   Ejecutar: nvbot3_env\\Scripts\\activate")
+        return 1
+    
+    logger.info("✅ Entorno virtual nvbot3_env activo")
+    
+    # 2. Verificar estrategia dual
+    step1 = run_command(
+        "python scripts/verify_dual_strategy_data.py",
+        "Verificando dual strategy (30 entrenamiento + 60 monitoreo)"
+    )
+    
+    # 3. Descargar datos de entrenamiento faltantes (si es necesario)
+    if not step1:
+        step2 = run_command(
+            "python scripts/download_training_data_only.py", 
+            "Descargando datos SOLO para entrenamiento (30 monedas)"
+        )
+        
+        if not step2:
+            logger.error("💥 No se pudieron descargar datos de entrenamiento")
+            return 1
+    
+    # 4. Verificación final dual
+    step3 = run_command(
+        "python scripts/verify_dual_strategy_data.py",
+        "Verificación final dual strategy"
+    )
+    
+    if not step3:
+        logger.error("💥 Verificación dual final fallida")
+        return 1
+    
+    # 5. Confirmar dual strategy readiness
+    logger.info("\n" + "="*60)
+    logger.info("🎉 ¡DUAL STRATEGY PREPARADA EXITOSAMENTE!")
+    logger.info("="*60)
+    logger.info("✅ Entorno virtual activo")
+    logger.info("✅ 30 monedas entrenamiento: datos históricos completos")
+    logger.info("✅ 60 monedas monitoreo: símbolos disponibles en Binance")
+    logger.info("✅ Separación completa: 0 overlap entre entrenamiento/monitoreo")
+    logger.info("✅ Sistema optimizado para laptop (60 streams)")
+    logger.info("✅ Anti-overfitting: prueba real de generalización")
+    logger.info("\n🚀 LISTO PARA: python scripts/model_trainer.py")
+    
+    return 0
+
+if __name__ == "__main__":
+    exit(main())
+```
+
+---
+
+## 📝 **COMANDOS DE EJECUCIÓN ACTUALIZADOS**
+
+### **Secuencia para implementar dual strategy:**
+
+```bash
+# 1. SIEMPRE activar entorno virtual primero
+nvbot3_env\Scripts\activate
+
+# 2. Crear configuración de monitoreo (nuevo archivo)
+# Crear manualmente: config/monitoring_config.yaml
+
+# 3. Verificar dual strategy actual
+python scripts/verify_dual_strategy_data.py
+
+# 4. Descargar solo datos de entrenamiento faltantes
+python scripts/download_training_data_only.py
+
+# 5. Ejecutar preparación dual completa (RECOMENDADO)
+python scripts/prepare_dual_strategy.py
+
+# 6. Una vez exitoso, proceder con Model Trainer
+python scripts/model_trainer.py
+```
+
+---
+
+## ⚠️ **INSTRUCCIONES CRÍTICAS PARA COPILOT**
+
+### **🎯 Principios dual strategy:**
+1. **SEPARACIÓN TOTAL**: 0 monedas compartidas entre entrenamiento/monitoreo
+2. **VERIFICACIÓN SELECTIVA**: Solo verificar datos históricos para las 30 de entrenamiento
+3. **WEBSOCKET ONLY**: Las 60 de monitoreo solo requieren disponibilidad en Binance
+4. **OPTIMIZACIÓN LAPTOP**: 60 streams distribuidos por frecuencia de actualización
+5. **GENERALIZACIÓN FORZADA**: Modelos nunca ven monedas de monitoreo = prueba real
+
+### **🔧 Implementación técnica:**
+1. **Configuraciones separadas**: training_config.yaml vs monitoring_config.yaml
+2. **Scripts especializados**: Solo descargar para entrenamiento
+3. **Verificación dual**: Históricos + WebSocket availability
+4. **Resource management**: CPU/Memory optimizado para 60 streams
+5. **Error handling**: Continuar si algunas monedas de monitoreo no disponibles
+
+---
+
+## 🎯 **RESULTADO ESPERADO DUAL STRATEGY**
+
+Al final de estos scripts, tendrás:
+
+- ✅ **30 monedas entrenamiento** con datos históricos completos (150 archivos CSV)
+- ✅ **60 monedas monitoreo** verificadas disponibles en Binance WebSocket  
+- ✅ **Separación total** entre entrenamiento y monitoreo (0% overlap)
+- ✅ **Sistema optimizado** para manejar 60 streams en laptop
+- ✅ **Prueba real** de generalización de modelos ML
+- ✅ **Arquitectura escalable** lista para producción
+
+**Estado objetivo:** Dual strategy 100% verificada y lista para Model Trainer robusto.

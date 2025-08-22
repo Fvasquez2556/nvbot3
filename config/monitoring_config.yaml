@@ -1,0 +1,45 @@
+# NvBot3 - Configuración SOLO para Monitoreo en Tiempo Real
+
+live_monitoring:
+  # 60 monedas DIFERENTES para monitoreo (nunca vistas en entrenamiento)
+  symbols:
+    monitoring_tier_m1: [
+      'LTCUSDT', 'BCHUSDT', 'XLMUSDT', 'TRXUSDT', 'ATOMUSDT',
+      'VETUSDT', 'NEOUSDT', 'DASHUSDT', 'ETCUSDT', 'ZECUSDT',
+      'QTUMUSDT', 'LSKUSDT', 'ICXUSDT', 'ZILUSDT', 'ONTUSDT',
+      'RVNUSDT'
+    ]
+    
+    monitoring_tier_m2: [
+      'CAKEUSDT', 'BANDUSDT', 'KNCUSDT', 'LRCUSDT', 'CHRUSDT',
+      'INJUSDT', 'DYDXUSDT', 'ENSUSDT', 'MASKUSDT', 'PERPUSDT',
+      'SUPERUSDT', 'ONEUSDT', 'NEARUSDT', 'ALGOUSDT', 'EGLDUSDT'
+    ]
+    
+    monitoring_tier_m3: [
+      'AXSUSDT', 'SLPUSDT', 'ALICEUSDT', 'TLMUSDT', 'GALAUSDT',
+      'FLMUSDT', 'CITYUSDT', 'BICOUSDT', 'GMTUSDT', 'MOVEUSDT',
+      'FLOWUSDT', 'THETAUSDT', 'TFUELUSDT', 'WOOUSDT', 'JASMYUSDT'
+    ]
+
+  # Configuración de recursos para laptop
+  websocket_config:
+    max_concurrent_streams: 60
+    stream_buffer_size: 1000
+    reconnect_delay: 5
+    
+    # Frecuencias optimizadas por tier
+    update_frequencies:
+      monitoring_tier_m1: 30  # Blue chips cada 30s (16 símbolos)
+      monitoring_tier_m2: 45  # DeFi cada 45s (15 símbolos)
+      monitoring_tier_m3: 60  # Gaming/AI cada 60s (15 símbolos)
+    
+    # Límites de recursos laptop
+    resource_limits:
+      max_cpu_percent: 75
+      max_memory_mb: 3072
+      max_threads: 4
+      batch_processing_size: 15
+
+  # Solo requiere WebSocket, NO datos históricos
+  historical_data_required: false

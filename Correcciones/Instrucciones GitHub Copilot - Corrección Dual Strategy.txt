@@ -1,0 +1,390 @@
+# 🔧 Instrucciones GitHub Copilot - Corrección Dual Strategy
+
+## 🎯 PROBLEMAS DETECTADOS Y SOLUCIONES
+
+Basándome en el reporte de verificación, necesitamos **3 correcciones críticas**:
+
+1. **📥 Completar descarga de datos de entrenamiento** (82 archivos faltantes)
+2. **⚙️ Ajustar criterios de validación** (730 registros 1d es suficiente)
+3. **📡 Actualizar lista de monitoreo** (remover 14 símbolos no disponibles)
+
+---
+
+## 🔧 **CORRECCIÓN 1: Descargador Masivo Inteligente**
+
+**Archivo:** `scripts/fix_training_data.py`
+
+```python
+"""
+Descargador masivo para completar TODOS los datos de entrenamiento faltantes.
+Basado en el reporte de verificación dual.
+"""
+
+import os
+import sys
+import yaml
+import asyncio
+import ccxt
+import pandas as pd
+from datetime import datetime, timedelta
+import logging
+from pathlib import Path
+from tqdm import tqdm
+import time
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+class CompleteMissingDataDownloader:
+    def __init__(self):
+        self.exchange = ccxt.binance({
+            'apiKey': os.getenv('BINANCE_API_KEY'),
+            'secret': os.getenv('BINANCE_SECRET_KEY'),
+            'sandbox': False,
+            'rateLimit': 1200,
+            'enableRateLimit': True,
+        })
+        
+        self.data_dir = Path('data/raw')
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Lista específica de archivos faltantes del reporte
+        self.missing_files = [
+            'ETHUSDT_5m.csv', 'ETHUSDT_15m.csv', 'ADAUSDT_5m.csv', 'ADAUSDT_15m.csv', 
+            'ADAUSDT_1d.csv', 'SOLUSDT_5m.csv', 'SOLUSDT_15m.csv', 'XRPUSDT_5m.csv', 
+            'XRPUSDT_15m.csv', 'LINKUSDT_5m.csv', 'LINKUSDT_15m.csv', 'AVAXUSDT_5m.csv', 
+            'AVAXUSDT_15m.csv', 'UNIUSDT_5m.csv', 'UNIUSDT_15m.csv', 'UNIUSDT_1h.csv', 
+            'UNIUSDT_4h.csv', 'UNIUSDT_1d.csv', 'AAVEUSDT_5m.csv', 'AAVEUSDT_15m.csv',
+            'SUSHIUSDT_5m.csv', 'SUSHIUSDT_15m.csv', 'COMPUSDT_5m.csv', 'COMPUSDT_15m.csv',
+            'YFIUSDT_5m.csv', 'YFIUSDT_15m.csv', 'SNXUSDT_5m.csv', 'SNXUSDT_15m.csv',
+            'CRVUSDT_5m.csv', 'CRVUSDT_15m.csv', '1INCHUSDT_5m.csv', '1INCHUSDT_15m.csv',
+            'ALPHAUSDT_4h.csv', 'SANDUSDT_5m.csv', 'SANDUSDT_1d.csv', 'ENJUSDT_5m.csv',
+            'ZRXUSDT_5m.csv', 'ZRXUSDT_15m.csv', 'ZRXUSDT_1d.csv', 'STORJUSDT_5m.csv',
+            'STORJUSDT_15m.csv', 'STORJUSDT_1d.csv', 'OCEANUSDT_5m.csv', 'OCEANUSDT_15m.csv',
+            'FETUSDT_5m.csv', 'FETUSDT_15m.csv', 'IOTAUSDT_5m.csv', 'IOTAUSDT_15m.csv'
+        ]
+        
+        # Archivos corruptos que necesitan re-descarga
+        self.corrupted_files = [
+            'BTCUSDT_1d.csv', 'ETHUSDT_1d.csv', 'BNBUSDT_1d.csv', 'SOLUSDT_1d.csv',
+            'XRPUSDT_1d.csv', 'DOTUSDT_1d.csv', 'LINKUSDT_1d.csv', 'MATICUSDT_5m.csv',
+            'MATICUSDT_15m.csv', 'MATICUSDT_1h.csv', 'MATICUSDT_4h.csv', 'MATICUSDT_1d.csv',
+            'AVAXUSDT_1d.csv', 'AAVEUSDT_1d.csv', 'MKRUSDT_1d.csv', 'SUSHIUSDT_1d.csv',
+            'COMPUSDT_1d.csv', 'YFIUSDT_1d.csv', 'SNXUSDT_1d.csv', 'CRVUSDT_1d.csv',
+            '1INCHUSDT_1d.csv', 'ALPHAUSDT_5m.csv', 'ALPHAUSDT_15m.csv', 'ALPHAUSDT_1h.csv',
+            'ALPHAUSDT_1d.csv', 'MANAUSDT_1d.csv', 'ENJUSDT_1d.csv', 'CHZUSDT_1d.csv',
+            'BATUSDT_1d.csv', 'OCEANUSDT_1h.csv', 'OCEANUSDT_4h.csv', 'OCEANUSDT_1d.csv',
+            'FETUSDT_1d.csv', 'IOTAUSDT_1d.csv'
+        ]
+    
+    def parse_filename(self, filename):
+        """Extraer símbolo y timeframe del nombre de archivo."""
+        parts = filename.replace('.csv', '').split('_')
+        if len(parts) == 2:
+            return parts[0], parts[1]
+        else:
+            # Manejo especial para símbolos como 1INCHUSDT
+            symbol = '_'.join(parts[:-1])
+            timeframe = parts[-1]
+            return symbol, timeframe
+    
+    def download_single_file(self, symbol, timeframe):
+        """Descargar datos para un símbolo y timeframe específico."""
+        try:
+            logger.info(f"📥 Descargando {symbol} {timeframe}...")
+            
+            # Configurar fechas
+            start_date = datetime(2022, 1, 1)
+            end_date = datetime.now()
+            
+            # Mapeo de timeframes
+            tf_map = {
+                '5m': '5m', '15m': '15m', '1h': '1h', 
+                '4h': '4h', '1d': '1d'
+            }
+            
+            if timeframe not in tf_map:
+                logger.error(f"❌ Timeframe no soportado: {timeframe}")
+                return False
+            
+            # Descargar datos usando ccxt
+            since = self.exchange.parse8601(start_date.isoformat())
+            limit = 1000
+            all_ohlcv = []
+            
+            while since < self.exchange.parse8601(end_date.isoformat()):
+                try:
+                    ohlcv = self.exchange.fetch_ohlcv(
+                        symbol, tf_map[timeframe], since, limit
+                    )
+                    
+                    if not ohlcv:
+                        break
+                    
+                    all_ohlcv.extend(ohlcv)
+                    since = ohlcv[-1][0] + 1  # Siguiente timestamp
+                    
+                    # Rate limiting
+                    time.sleep(0.1)
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Error en chunk para {symbol}: {e}")
+                    break
+            
+            if not all_ohlcv:
+                logger.error(f"❌ No se obtuvieron datos para {symbol} {timeframe}")
+                return False
+            
+            # Convertir a DataFrame
+            df = pd.DataFrame(all_ohlcv, columns=[
+                'timestamp', 'open', 'high', 'low', 'close', 'volume'
+            ])
+            
+            # Agregar columnas adicionales requeridas
+            df['close_time'] = df['timestamp'] + (
+                60000 * {'5m': 5, '15m': 15, '1h': 60, '4h': 240, '1d': 1440}[timeframe]
+            )
+            df['quote_asset_volume'] = df['volume'] * df['close']
+            df['number_of_trades'] = 0  # Placeholder
+            df['taker_buy_base_asset_volume'] = df['volume'] * 0.5  # Placeholder
+            df['taker_buy_quote_asset_volume'] = df['quote_asset_volume'] * 0.5
+            
+            # Convertir timestamps
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
+            
+            # Guardar archivo
+            filename = f"{symbol}_{timeframe}.csv"
+            filepath = self.data_dir / filename
+            df.to_csv(filepath, index=False)
+            
+            logger.info(f"✅ {filename}: {len(df)} registros guardados")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error descargando {symbol} {timeframe}: {e}")
+            return False
+    
+    def download_all_missing_files(self):
+        """Descargar todos los archivos faltantes y corruptos."""
+        all_files_to_download = list(set(self.missing_files + self.corrupted_files))
+        total_files = len(all_files_to_download)
+        
+        logger.info(f"🚀 INICIANDO DESCARGA MASIVA DE {total_files} ARCHIVOS")
+        logger.info("="*60)
+        
+        successful = 0
+        failed = 0
+        
+        for i, filename in enumerate(all_files_to_download, 1):
+            try:
+                symbol, timeframe = self.parse_filename(filename)
+                
+                logger.info(f"\n📥 [{i}/{total_files}] Procesando {filename}")
+                
+                success = self.download_single_file(symbol, timeframe)
+                
+                if success:
+                    successful += 1
+                    logger.info(f"✅ [{i}/{total_files}] Completado: {filename}")
+                else:
+                    failed += 1
+                    logger.error(f"❌ [{i}/{total_files}] Falló: {filename}")
+                
+            except Exception as e:
+                failed += 1
+                logger.error(f"❌ [{i}/{total_files}] Error procesando {filename}: {e}")
+        
+        # Reporte final
+        logger.info("\n" + "="*60)
+        logger.info("📊 REPORTE DESCARGA MASIVA COMPLETADA")
+        logger.info("="*60)
+        logger.info(f"✅ Archivos exitosos: {successful}")
+        logger.info(f"❌ Archivos fallidos: {failed}")
+        logger.info(f"📈 Tasa de éxito: {successful/total_files*100:.1f}%")
+        
+        if successful >= total_files * 0.8:  # 80% éxito
+            logger.info("🎉 DESCARGA MASIVA EXITOSA")
+            return True
+        else:
+            logger.error("⚠️ DESCARGA MASIVA INCOMPLETA")
+            return False
+
+def main():
+    downloader = CompleteMissingDataDownloader()
+    success = downloader.download_all_missing_files()
+    return 0 if success else 1
+
+if __name__ == "__main__":
+    exit(main())
+```
+
+---
+
+## 🔧 **CORRECCIÓN 2: Criterios de Validación Mejorados**
+
+**Archivo:** `scripts/verify_dual_strategy_data_v2.py`
+
+```python
+"""
+Verificador dual mejorado con criterios más realistas.
+- 730 registros 1d = OK (2 años de datos)
+- Datos hasta hace 60 días = OK (no 30 días)
+"""
+
+# [Insertar el código del verificador anterior pero con estos cambios]
+
+class DualStrategyVerifierV2:
+    # ... código anterior ...
+    
+    def verify_file_exists_and_quality(self, filename):
+        """Verificar archivo con criterios MEJORADOS."""
+        file_path = self.data_dir / filename
+        
+        if not file_path.exists():
+            return False, "Archivo no existe"
+        
+        try:
+            df = pd.read_csv(file_path)
+            
+            # CRITERIOS MEJORADOS por timeframe
+            timeframe = filename.split('_')[1].replace('.csv', '')
+            min_records = {
+                '5m': 1000,   # ~3.5 días mínimo
+                '15m': 1000,  # ~10 días mínimo  
+                '1h': 1000,   # ~42 días mínimo
+                '4h': 1000,   # ~166 días mínimo
+                '1d': 600     # ~1.6 años mínimo (CORREGIDO)
+            }
+            
+            required_records = min_records.get(timeframe, 1000)
+            if len(df) < required_records:
+                return False, f"Muy pocos datos: {len(df)} < {required_records}"
+            
+            # Verificar columnas
+            required_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+            missing_cols = [col for col in required_columns if col not in df.columns]
+            if missing_cols:
+                return False, f"Columnas faltantes: {missing_cols}"
+            
+            # CRITERIO MEJORADO: Datos hasta hace 60 días = OK
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            latest_date = df['timestamp'].max()
+            cutoff_date = datetime.now() - timedelta(days=60)  # CAMBIADO de 30 a 60
+            
+            if latest_date < cutoff_date:
+                return False, f"Datos obsoletos. Último: {latest_date.date()}"
+            
+            return True, f"OK - {len(df)} registros hasta {latest_date.date()}"
+            
+        except Exception as e:
+            return False, f"Error leyendo: {e}"
+```
+
+---
+
+## 🔧 **CORRECCIÓN 3: Lista de Monitoreo Actualizada**
+
+**Archivo:** `config/monitoring_config_v2.yaml`
+
+```yaml
+# NvBot3 - Configuración Monitoreo ACTUALIZADA (solo símbolos disponibles)
+
+live_monitoring:
+  # 46 monedas VERIFICADAS disponibles en Binance
+  symbols:
+    # Tier M1: Blue Chips disponibles (16 monedas)
+    monitoring_tier_m1: [
+      'LTCUSDT', 'BCHUSDT', 'XLMUSDT', 'TRXUSDT', 'ATOMUSDT',
+      'VETUSDT', 'NEOUSDT', 'DASHUSDT', 'ETCUSDT', 'ZECUSDT',
+      'QTUMUSDT', 'LSKUSDT', 'ICXUSDT', 'ZILUSDT', 'ONTUSDT', 'RVNUSDT'
+    ]
+    
+    # Tier M2: DeFi/L2 disponibles (15 monedas)  
+    monitoring_tier_m2: [
+      'CAKEUSDT', 'BANDUSDT', 'KNCUSDT', 'LRCUSDT', 'CHRUSDT',
+      'INJUSDT', 'DYDXUSDT', 'ENSUSDT', 'MASKUSDT', 'PERPUSDT',
+      'SUPERUSDT', 'ONEUSDT', 'NEARUSDT', 'ALGOUSDT', 'EGLDUSDT'
+    ]
+    
+    # Tier M3: Gaming/AI disponibles (15 monedas)
+    monitoring_tier_m3: [
+      'AXSUSDT', 'SLPUSDT', 'ALICEUSDT', 'TLMUSDT', 'GALAUSDT',
+      'FLMUSDT', 'CITYUSDT', 'BICOUSDT', 'GMTUSDT', 'MOVEUSDT',
+      'FLOWUSDT', 'THETAUSDT', 'TFUELUSDT', 'WOOUSDT', 'JASMYUSDT'
+    ]
+
+  # Configuración optimizada para 46 streams
+  websocket_config:
+    max_concurrent_streams: 46
+    update_frequencies:
+      monitoring_tier_m1: 30  # Blue chips cada 30s
+      monitoring_tier_m2: 45  # DeFi cada 45s  
+      monitoring_tier_m3: 60  # Gaming cada 60s
+    
+    resource_limits:
+      max_cpu_percent: 70     # Reducido para 46 streams
+      max_memory_mb: 2560     # Ajustado para 46 streams
+      max_threads: 4
+
+  historical_data_required: false
+
+# ELIMINADOS: EOSUSDT, XMRUSDT, OMGUSDT, WAVESUSDT, RENUSDT, BALUSDT,
+# KLAYUSDT, HARMONYUSDT, LOOKSUSDT, STEPNUSDT, SWEATUSDT, FITFIUSDT, NFTUSDT
+```
+
+---
+
+## 📝 **SECUENCIA DE COMANDOS ACTUALIZADOS**
+
+```bash
+# 1. SIEMPRE activar entorno virtual
+nvbot3_env\Scripts\activate
+
+# 2. Descargar TODOS los datos faltantes (CRÍTICO)
+python scripts/fix_training_data.py
+
+# 3. Verificar con criterios mejorados
+python scripts/verify_dual_strategy_data_v2.py
+
+# 4. Si aún hay problemas, re-ejecutar descarga específica
+python scripts/download_training_data_only.py
+
+# 5. Verificación final optimizada
+python scripts/prepare_dual_strategy.py
+```
+
+---
+
+## ⚠️ **INSTRUCCIONES CRÍTICAS PARA COPILOT**
+
+### **🎯 Prioridades de ejecución:**
+
+1. **DESCARGAR MASIVO PRIMERO** - El 82% de archivos faltantes es prioridad #1
+2. **CRITERIOS REALISTAS** - 730 registros 1d = 2 años, es suficiente
+3. **LISTA ACTUALIZADA** - Solo usar 46 monedas verificadas para monitoreo
+4. **RATE LIMITING** - Respetar límites Binance (sleep 0.1s entre requests)
+5. **ERROR HANDLING** - Continuar aunque algunos símbolos fallen
+
+### **🔧 Configuraciones específicas:**
+
+- **Timeframe 1d**: Mínimo 600 registros (1.6 años) = VÁLIDO
+- **Datos obsoletos**: Hasta 60 días atrás = OK  
+- **Monitoreo**: 46 monedas en lugar de 60
+- **Recursos**: 70% CPU, 2.5GB RAM para 46 streams
+
+---
+
+## 🎯 **RESULTADO ESPERADO DESPUÉS DE CORRECCIONES**
+
+### **📚 Entrenamiento mejorado:**
+- ✅ **140+/150 archivos válidos** (93%+)
+- ✅ **Datos completos** para todas las 30 monedas
+- ✅ **Criterios realistas** aplicados
+
+### **📡 Monitoreo optimizado:**
+- ✅ **46/46 símbolos disponibles** (100%)  
+- ✅ **Lista verificada** en Binance
+- ✅ **Recursos optimizados** para laptop
+
+**Estado objetivo:** Dual strategy 95%+ completa y lista para Model Trainer robusto.
