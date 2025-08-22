@@ -1,0 +1,196 @@
+# 📋 Instrucciones de Uso - Validador CSV NvBot3
+
+## 🚀 Cómo Ejecutar el Validador
+
+### **Paso 1: Preparación**
+```bash
+# 1. Activar entorno virtual (CRÍTICO)
+nvbot3_env\Scripts\activate  # Windows
+# source nvbot3_env/bin/activate  # Linux/Mac
+
+# 2. Navegar al directorio del proyecto
+cd nvbot3
+
+# 3. Guardar el script como: scripts/validate_csv_format.py
+```
+
+### **Paso 2: Ejecución Básica**
+```bash
+# Ejecutar validación completa
+python scripts/validate_csv_format.py
+```
+
+### **Paso 3: Revisar Resultados**
+El script genera:
+- **Console output**: Progreso en tiempo real
+- **csv_validation_report.log**: Log detallado 
+- **csv_validation_detailed_report.json**: Reporte técnico completo
+
+---
+
+## 📊 Interpretación de Resultados
+
+### **✅ RESULTADO IDEAL:**
+```
+📊 REPORTE FINAL DE VALIDACIÓN CSV
+===============================
+📁 Total archivos analizados: 150
+✅ Archivos válidos: 150
+⚠️ Archivos con problemas: 0
+🚨 Errores críticos: 0
+📈 Tasa de éxito: 100.0%
+
+🤖 COMPATIBILIDAD PARA ENTRENAMIENTO:
+🔧 Feature Calculator listos: 150/150
+🎯 Target Creator listos: 150/150
+🚀 Listos para entrenamiento: 150/150
+
+🎉 ¡TODOS LOS ARCHIVOS ESTÁN LISTOS PARA ENTRENAMIENTO!
+```
+
+### **⚠️ PROBLEMAS TÍPICOS Y SOLUCIONES:**
+
+#### **Problema 1: Columnas Faltantes**
+```
+❌ missing_columns: Columnas faltantes: ['volume', 'close_time']
+```
+**Solución**: Re-descargar archivos con downloader actualizado
+
+#### **Problema 2: Datos Insuficientes**
+```
+❌ insufficient_data_for_features: 150 < 200 períodos
+```
+**Solución**: Descargar más datos históricos (período más largo)
+
+#### **Problema 3: Gaps Temporales**
+```
+⚠️ temporal_gaps: 15 gaps grandes detectados
+```
+**Solución**: Verificar conectividad durante descarga, rellenar gaps
+
+#### **Problema 4: Precios Inválidos**
+```
+❌ invalid_ohlc_relationships: 25 registros con relaciones OHLC inválidas
+```
+**Solución**: Verificar fuente de datos, re-descargar archivos afectados
+
+#### **Problema 5: Formato Timestamp**
+```
+❌ timestamp_format: Formato de timestamp no válido
+```
+**Solución**: Convertir timestamps a formato estándar (ISO o epoch)
+
+---
+
+## 🔧 Acciones Correctivas Automáticas
+
+### **Script de Corrección Rápida** (Opcional)
+```python
+# Agregar al final del validador principal:
+
+def fix_common_issues(csv_file: str):
+    """Corregir problemas comunes automáticamente."""
+    df = pd.read_csv(csv_file)
+    
+    # 1. Convertir timestamps
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
+    # 2. Rellenar gaps pequeños (forward fill)
+    df = df.sort_values('timestamp')
+    df = df.fillna(method='ffill', limit=2)
+    
+    # 3. Remover outliers extremos
+    for col in ['open', 'high', 'low', 'close']:
+        Q1 = df[col].quantile(0.01)
+        Q3 = df[col].quantile(0.99)
+        df = df[(df[col] >= Q1) & (df[col] <= Q3)]
+    
+    # 4. Guardar archivo corregido
+    df.to_csv(csv_file.replace('.csv', '_fixed.csv'), index=False)
+    print(f"✅ Archivo corregido: {csv_file}_fixed.csv")
+```
+
+---
+
+## 📈 Métricas de Calidad Específicas
+
+### **Para Feature Calculator:**
+- ✅ **Mínimo 200 períodos** para indicadores largos (SMA 200)
+- ✅ **<5% valores NaN** en OHLCV
+- ✅ **Datos continuos** sin gaps grandes
+
+### **Para Target Creator:**
+- ✅ **Períodos futuros suficientes**:
+  - 5m: ≥48 períodos adelante (4h momentum)
+  - 15m: ≥16 períodos adelante (4h momentum)  
+  - 1h: ≥4 períodos adelante (4h momentum)
+- ✅ **≥1000 períodos utilizables** después de lookforward
+- ✅ **Precios de cierre continuos** para calcular cambios
+
+### **Para Model Trainer:**
+- ✅ **Formato consistente** entre archivos
+- ✅ **Sin errores críticos** en validación
+- ✅ **Temporal splits posibles** (mínimo 70% para train)
+
+---
+
+## 🎯 Casos de Uso Específicos
+
+### **Caso 1: Validación Después de Descarga**
+```bash
+# Después de descargar datos nuevos
+python scripts/download_historical_data.py
+python scripts/validate_csv_format.py
+```
+
+### **Caso 2: Validación Pre-Entrenamiento**
+```bash
+# Antes de ejecutar Model Trainer
+python scripts/validate_csv_format.py
+if [ $? -eq 0 ]; then
+    python scripts/model_trainer.py
+else
+    echo "❌ Corregir datos antes del entrenamiento"
+fi
+```
+
+### **Caso 3: Validación de Archivos Específicos**
+```python
+# Validar solo archivos de un símbolo
+validator = CSVFormatValidator()
+btc_files = [f for f in os.listdir('data/raw') if f.startswith('BTCUSDT')]
+for file in btc_files:
+    result = validator._validate_single_file(Path(f'data/raw/{file}'))
+    print(f"{file}: {'✅ Válido' if result['is_valid'] else '❌ Problemas'}")
+```
+
+---
+
+## 💡 Recomendaciones Finales
+
+### **🔄 Ejecutar Regularmente:**
+- **Después de cada descarga** de datos nuevos
+- **Antes de entrenar modelos** nuevos
+- **Semanalmente** como mantenimiento
+
+### **📊 Monitorear Métricas:**
+- **Success rate ≥95%** para entrenamiento confiable
+- **Training ready = Total files** para pipeline completo
+- **Zero critical errors** obligatorio antes de Model Trainer
+
+### **🚨 Alertas Críticas:**
+Si ves estos errores, **DETENER** entrenamiento:
+- `missing_columns` con columnas OHLCV
+- `insufficient_data_for_features`
+- `invalid_ohlc_relationships` >1% de datos
+- `temporal_order` desordenado
+
+### **✅ Estado Ideal:**
+```
+🎉 VALIDACIÓN EXITOSA: Todos los archivos listos para entrenamiento
+🔧 Feature Calculator: 150/150 archivos listos
+🎯 Target Creator: 150/150 archivos listos  
+🚀 Model Trainer: LISTO PARA EJECUTAR
+```
+
+**¡Con este validador tu NvBot3 tendrá datos de calidad garantizada para detectar momentum, rebotes y regímenes con máxima precisión!** 🚀

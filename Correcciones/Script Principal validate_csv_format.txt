@@ -1,0 +1,48 @@
+🎉 RESUMEN DE LO QUE HE CREADO:
+📝 Script Principal: validate_csv_format.py
+
+Validación completa de formato CSV
+Compatibilidad específica para Feature Calculator y Target Creator
+Detección inteligente de problemas críticos vs warnings
+Reporte detallado con recomendaciones
+
+📋 Instrucciones de Uso Completas
+
+Paso a paso para ejecutar validación
+Interpretación de resultados con ejemplos reales
+Soluciones específicas para problemas comunes
+Métricas de calidad para cada componente
+
+🚀 PRÓXIMOS PASOS RECOMENDADOS:
+
+Guardar el script como scripts/validate_csv_format.py
+Ejecutar validación en tus datos descargados
+Revisar reporte y corregir problemas críticos
+Confirmar compatibilidad antes del Model Trainer
+
+🔍 VALIDACIONES CLAVE PARA TU BOT:
+✅ Para Momentum Detection (≥5%):
+
+Datos futuros suficientes (48 períodos en 5m)
+Precios continuos sin gaps grandes
+Relaciones OHLC válidas
+
+✅ Para Rebound Detection (1-3%):
+
+Períodos lookforward adecuados (24 en 5m)
+Volúmenes válidos para análisis
+Timestamps ordenados cronológicamente
+
+✅ Para Regime Classification:
+
+Datos suficientes para tendencias largas
+Indicadores técnicos calculables (≥200 períodos)
+Consistencia temporal para walk-forward validation
+
+📊 BENEFICIOS DEL VALIDADOR:
+
+🛡️ Previene errores durante entrenamiento
+⚡ Optimiza calidad de predicciones
+🔧 Detecta problemas antes que afecten modelos
+📈 Garantiza compatibilidad con toda la pipeline
+💡 Proporciona soluciones específicas automáticamente
