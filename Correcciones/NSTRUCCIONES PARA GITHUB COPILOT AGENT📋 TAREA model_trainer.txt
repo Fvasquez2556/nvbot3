@@ -1,0 +1,229 @@
+🎯 INSTRUCCIONES PARA GITHUB COPILOT AGENT
+📋 TAREA: Crear scripts/model_trainer.py
+CONTEXTO: Sistema NvBot3 de trading con IA. Es el módulo FINAL que falta para completar el bot. Los datos están perfectos (151 features + 4 targets balanceados). Necesitas crear un entrenador de modelos profesional con sistema anti-overfitting.
+
+📁 ESPECIFICACIONES DEL ARCHIVO:
+Ubicación: scripts/model_trainer.py
+Objetivo: Entrenar 3 modelos especializados con validación robusta y sistema anti-overfitting para trading real.
+
+🎯 MODELOS A IMPLEMENTAR:
+python# ESTRUCTURA DE MODELOS REQUERIDA:
+class ModelTrainer:
+    def __init__(self):
+        # Setup paths, logging, anti-overfitting config
+        
+    def train_momentum_detector(self) -> XGBoost+RandomForest Ensemble:
+        # Target: momentum_target (≥5% movimientos)
+        # Precisión objetivo: >75%
+        
+    def train_rebound_predictor(self) -> LSTM Neural Network:
+        # Target: rebound_target (1-3% rebotes)
+        # Enfoque: Secuencias temporales
+        
+    def train_regime_classifier(self) -> SVM Multiclass:
+        # Target: regime_target (0=Bear, 1=Sideways, 2=Bull)
+        # Balanceado: 78% sideways, 11% bull/bear
+        
+    def ensemble_models(self) -> Combined Predictor:
+        # Combinar los 3 modelos inteligentemente
+
+🛡️ SISTEMA ANTI-OVERFITTING (CRÍTICO):
+NUNCA USAR RANDOM SPLITS - SOLO TEMPORAL SPLITS
+python# VALIDACIÓN TEMPORAL OBLIGATORIA:
+class AntiOverfittingValidator:
+    def walk_forward_validation(self, df, model_class, target_col):
+        # Dividir temporalmente: 60% train, 20% val, 20% test
+        # NUNCA mezclar fechas entre sets
+        # Walk-forward windows de 6 meses
+        
+    def early_stopping(self, model, X_train, y_train, X_val, y_val):
+        # Parar entrenamiento cuando val_score empeora
+        # Patience: 10 epochs para LSTM, 50 rounds para XGBoost
+        
+    def regularization_config(self):
+        # XGBoost: max_depth=4, min_child_weight=3, subsample=0.8
+        # LSTM: dropout=0.3, l2_reg=0.01
+        # SVM: C=0.1, gamma='scale'
+
+📊 CONFIGURACIÓN DE MODELOS:
+1. MOMENTUM DETECTOR (XGBoost + RandomForest):
+pythonmomentum_config = {
+    'xgboost': {
+        'n_estimators': 100,
+        'max_depth': 4,
+        'learning_rate': 0.1,
+        'subsample': 0.8,
+        'colsample_bytree': 0.8,
+        'min_child_weight': 3,
+        'reg_alpha': 0.1,
+        'reg_lambda': 0.1
+    },
+    'random_forest': {
+        'n_estimators': 100,
+        'max_depth': 6,
+        'min_samples_split': 10,
+        'min_samples_leaf': 5,
+        'max_features': 'sqrt'
+    },
+    'ensemble_weights': [0.7, 0.3]  # XGBoost + RF
+}
+2. REBOUND PREDICTOR (LSTM):
+pythonrebound_config = {
+    'sequence_length': 24,  # 24 períodos de lookback
+    'lstm_units': [64, 32],
+    'dropout': 0.3,
+    'l2_regularization': 0.01,
+    'batch_size': 64,
+    'epochs': 100,
+    'early_stopping_patience': 10
+}
+3. REGIME CLASSIFIER (SVM):
+pythonregime_config = {
+    'kernel': 'rbf',
+    'C': 0.1,
+    'gamma': 'scale',
+    'class_weight': 'balanced',  # Para manejar desbalance
+    'max_iter': 1000
+}
+
+💾 ESPECIFICACIONES DE ENTRADA/SALIDA:
+Input:
+
+Archivos desde data/processed/{symbol}_{timeframe}_with_targets.csv
+Features: Todas las columnas EXCEPTO targets y timestamps
+Targets: momentum_target, rebound_target, regime_target
+
+Output:
+
+Modelos guardados en models/{model_name}_{symbol}_{timeframe}.pkl
+Métricas en results/training_metrics.json
+Predicciones de validación en results/validation_predictions.csv
+
+
+📈 MÉTRICAS DE EVALUACIÓN:
+python# MÉTRICAS ESPECÍFICAS PARA TRADING:
+trading_metrics = {
+    'momentum_detector': {
+        'primary': 'precision',  # Evitar falsos positivos
+        'secondary': ['recall', 'f1_score', 'roc_auc'],
+        'target': 0.75  # >75% precisión
+    },
+    'rebound_predictor': {
+        'primary': 'f1_score',  # Balance precision/recall
+        'secondary': ['precision', 'recall', 'accuracy'],
+        'target': 0.65
+    },
+    'regime_classifier': {
+        'primary': 'macro_f1',  # Para multiclass balanceado
+        'secondary': ['accuracy', 'confusion_matrix'],
+        'target': 0.70
+    }
+}
+
+🔧 DEPENDENCIAS REQUERIDAS:
+pythonimport pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import classification_report, confusion_matrix
+import xgboost as xgb
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.callbacks import EarlyStopping
+import joblib
+import json
+import logging
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+from datetime import datetime
+import warnings
+warnings.filterwarnings('ignore')
+
+⚙️ CARACTERÍSTICAS TÉCNICAS AVANZADAS:
+1. HYPERPARAMETER TUNING:
+pythondef optimize_hyperparameters(self, model_type, X, y):
+    # Grid search con TimeSeriesSplit
+    # 5-fold temporal cross-validation
+    # Optimizar según métrica específica de trading
+2. FEATURE IMPORTANCE:
+pythondef analyze_feature_importance(self, model, feature_names):
+    # Top 20 features más importantes
+    # Guardar en results/feature_importance.json
+    # Plot y guardar en results/feature_importance.png
+3. ENSEMBLE INTELIGENTE:
+pythondef create_ensemble_predictor(self):
+    # Combinar 3 modelos con pesos adaptativos
+    # Momentum: 40%, Rebound: 30%, Regime: 30%
+    # Generar señal final con confianza
+
+🚀 COMANDOS DE EJECUCIÓN:
+bash# Entrenar modelo específico
+python scripts/model_trainer.py --model momentum --symbol BTCUSDT --timeframe 5m
+
+# Entrenar todos los modelos para un símbolo
+python scripts/model_trainer.py --symbol BTCUSDT --timeframe 5m --all-models
+
+# Entrenamiento masivo (todos los símbolos)
+python scripts/model_trainer.py --train-all-symbols
+
+# Solo evaluación (cargar modelos existentes)
+python scripts/model_trainer.py --evaluate-only --symbol BTCUSDT --timeframe 5m
+
+⚠️ INSTRUCCIONES ANTI-OVERFITTING CRÍTICAS:
+
+TEMPORAL SPLITS OBLIGATORIOS - NUNCA random splits
+SEPARACIÓN ESTRICTA - Train: 2022-mid 2024, Val: mid 2024-end 2024, Test: 2025
+EARLY STOPPING automático en todos los modelos
+REGULARIZACIÓN AGRESIVA - Parámetros conservadores
+WALK-FORWARD VALIDATION con ventanas de 6 meses
+DETECCIÓN AUTOMÁTICA de overfitting (val_score < train_score * 0.9)
+LOGGING EXTENSIVO de todas las métricas
+OPTIMIZADO PARA LAPTOP - Máximo 4 threads simultáneos
+
+
+🎯 OBJETIVOS DE PERFORMANCE:
+
+Precisión Momentum: >75% (detectar movimientos ≥5%)
+Latencia: <200ms desde features hasta predicción
+Robustez: Funcionar en bull y bear markets
+Escalabilidad: Modelos listos para 46 monedas en tiempo real
+Memoria: <2GB RAM usage durante entrenamiento
+
+
+📋 ESTRUCTURA FINAL ESPERADA:
+pythonclass ModelTrainer:
+    def __init__(self):
+        # Setup y configuración
+    
+    def load_training_data(self, symbol, timeframe):
+        # Cargar datos con features y targets
+    
+    def temporal_split(self, df):
+        # Split temporal obligatorio
+    
+    def train_momentum_detector(self, X, y):
+        # XGBoost + RandomForest ensemble
+    
+    def train_rebound_predictor(self, X, y):
+        # LSTM neural network
+    
+    def train_regime_classifier(self, X, y):
+        # SVM multiclass
+    
+    def evaluate_model(self, model, X_test, y_test):
+        # Métricas específicas de trading
+    
+    def save_models(self, models_dict, symbol, timeframe):
+        # Guardar modelos entrenados
+    
+    def train_all_models_for_symbol(self, symbol, timeframe):
+        # Pipeline completo para un símbolo
+    
+    def train_all_symbols(self):
+        # Entrenamiento masivo
+
+🎯 RESULTADO ESPERADO: Un módulo robusto que entrene los 3 modelos especializados, aplique validación anti-overfitting y genere predicciones listas para trading real.
+¿Procedes a crear el Model Trainer con estas especificaciones? 🤖🚀

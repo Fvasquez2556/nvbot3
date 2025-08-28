@@ -1,0 +1,133 @@
+🎯 INSTRUCCIONES PARA GITHUB COPILOT
+📋 TAREA: Crear src/data/feature_calculator.py
+CONTEXTO: Sistema NvBot3 de trading con IA. Los CSV están validados y listos. Necesitas crear un calculador de features técnicos profesional.
+
+📁 ESPECIFICACIONES DEL ARCHIVO:
+Ubicación: src/data/feature_calculator.py
+Objetivo: Calcular 151 features técnicos organizados en 6 categorías para entrenamiento de modelos de trading.
+
+🔧 CARACTERÍSTICAS TÉCNICAS REQUERIDAS:
+python# ESTRUCTURA DE CLASES REQUERIDA:
+class FeatureCalculator:
+    def __init__(self):
+        # Configurar paths y parámetros
+        # Setup logging
+        # Crear directorios de salida
+        
+    def calculate_all_features(self, symbol: str, timeframe: str) -> pd.DataFrame:
+        # Método principal que llama a todas las categorías
+        
+    def calculate_momentum_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        # 17 features: ROC, ADX, MACD, RSI, Stochastic, Williams %R
+        
+    def calculate_rebound_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        # 15 features: RSI reversal, MACD divergence, Volume patterns
+        
+    def calculate_regime_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        # 20 features: ATR, BB Width, ADX, Market structure
+        
+    def calculate_volume_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        # Features de volumen: OBV, Volume ratios, Volume momentum
+        
+    def calculate_price_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        # Features de precio: MA, EMA, Bollinger Bands
+        
+    def calculate_pattern_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        # Features de patrones: Support/Resistance, Breakouts
+
+📊 FEATURES ESPECÍFICOS A IMPLEMENTAR:
+1. MOMENTUM FEATURES (17 total):
+
+RSI (7, 14, 21 períodos)
+ROC (5, 10, 20 períodos)
+ADX (14)
+MACD (12,26,9) + Signal + Histogram
+Stochastic (14,3,3)
+Williams %R (14)
+
+2. REBOUND FEATURES (15 total):
+
+RSI oversold/overbought signals
+MACD bullish/bearish divergence
+Volume spike detection
+Price deviation from MA
+
+3. REGIME FEATURES (20 total):
+
+ATR (14)
+Bollinger Band Width
+Market volatility indicators
+Trend strength indicators
+
+4. VOLUME FEATURES:
+
+OBV (On-Balance Volume)
+Volume Moving Averages
+Volume Rate of Change
+Volume relative to average
+
+5. PRICE FEATURES:
+
+SMA (5,10,20,50,100,200)
+EMA (12,26,50)
+Bollinger Bands + Position
+
+6. PATTERN FEATURES:
+
+Support/Resistance levels
+Breakout detection
+Consolidation patterns
+
+
+💾 ESPECIFICACIONES DE ENTRADA/SALIDA:
+Input:
+
+Archivos CSV desde data/raw/{symbol}_{timeframe}.csv
+Formato: timestamp, open, high, low, close, volume
+
+Output:
+
+Guardar en data/processed/{symbol}_{timeframe}_features.csv
+Incluir todas las columnas originales + 151 features nuevas
+
+
+🔧 DEPENDENCIAS REQUERIDAS:
+pythonimport pandas as pd
+import numpy as np
+import ta  # Technical Analysis library
+import logging
+from pathlib import Path
+from typing import Dict, List, Optional
+
+📋 FUNCIONALIDADES ADICIONALES:
+
+Progress tracking: Barra de progreso con tqdm
+Error handling: Try-catch robusto
+Logging: Información detallada de proceso
+Validación: Verificar que features no tienen inf/NaN
+Resumen: Mostrar estadísticas de features calculadas
+Memory efficiency: Procesar en chunks si es necesario
+
+
+🚀 COMANDOS DE EJECUCIÓN:
+bash# Procesar símbolo específico
+python src/data/feature_calculator.py --symbol BTCUSDT --timeframe 5m
+
+# Procesar todos los símbolos
+python src/data/feature_calculator.py --all-symbols
+
+# Con guardado automático
+python src/data/feature_calculator.py --all-symbols --save
+
+⚠️ INSTRUCCIONES CRÍTICAS:
+
+USAR la librería ta para indicadores técnicos profesionales
+MANEJAR NaN values apropiadamente (forward fill limitado)
+PRESERVAR timestamps como índice del DataFrame
+LOGGING extensivo para debugging
+VALIDAR datos antes de calcular features
+OPTIMIZAR memoria para archivos grandes
+CATEGORIZAR features claramente con prefijos
+
+
+🎯 RESULTADO ESPERADO: Un módulo robusto que transforme los 150 CSV validados en datasets listos para entrenamiento de ML, con 151 features técnicos organizados y etiquetados correctamente.
