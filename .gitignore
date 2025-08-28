@@ -202,3 +202,10 @@ debug_output/
 docs/personal/
 notes/
 draft/
+
+# ========================
+# EXCLUSIONES ADICIONALES
+# ========================
+# Excluir carpetas y archivos específicos
+/data/checkpoints/
+data/models/
