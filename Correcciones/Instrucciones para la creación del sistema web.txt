@@ -1,0 +1,292 @@
+Instrucciones para la creación del sistema web
+
+🎯 FASE 1: PREPARACIÓN DEL ENTORNO
+Paso 1.1: Verificar Estado Actual
+
+# Ejecutar en terminal desde directorio nvbot3/
+nvbot3_env\Scripts\activate
+python -c "import os; print('Directorio actual:', os.getcwd())"
+ls -la  # Verificar estructura existente
+
+Paso 1.2: Instalar Dependencias Adicionales
+
+# Instalar librerías para el sistema web
+pip install flask==2.3.2
+pip install flask-socketio==5.3.4
+pip install python-socketio==5.8.0
+
+# Verificar instalación
+python -c "import flask, flask_socketio; print('✅ Dependencias instaladas correctamente')"
+
+🏗️ FASE 2: CREAR ESTRUCTURA DEL SISTEMA WEB
+
+Paso 2.1: Crear Directorios del Sistema Web
+# Crear estructura completa
+mkdir web_dashboard
+mkdir web_dashboard/templates
+mkdir web_dashboard/static
+mkdir web_dashboard/static/css
+mkdir web_dashboard/static/js
+mkdir web_dashboard/database
+
+# Verificar creación
+find web_dashboard -type d
+
+
+Paso 2.2: Crear Signal Tracker (Base de Datos)
+Crear archivo: web_dashboard/database/signal_tracker.py
+
+import sqlite3
+import json
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+import pandas as pd
+
+class SignalTracker:
+    """
+    Sistema de tracking que se integra con nvbot3 existente
+    Guarda cada predicción y monitorea automáticamente los resultados
+    """
+    
+    def __init__(self, db_path: str = "web_dashboard/database/signals.db"):
+        self.db_path = db_path
+        self.init_database()
+    
+    def init_database(self):
+        """Crea las tablas necesarias si no existen"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Tabla principal de señales
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS signals (
+            signal_id TEXT PRIMARY KEY,
+            symbol TEXT NOT NULL,
+            signal_type TEXT NOT NULL,
+            entry_price REAL NOT NULL,
+            entry_timestamp DATETIME NOT NULL,
+            predicted_change REAL NOT NULL,
+            confidence_score REAL NOT NULL,
+            expected_timeframe INTEGER NOT NULL,
+            status TEXT DEFAULT 'monitoring',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        
+        # Tabla de tracking de precios (cada 10 minutos)
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS price_tracking (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id TEXT NOT NULL,
+            timestamp DATETIME NOT NULL,
+            price REAL NOT NULL,
+            change_percent REAL NOT NULL,
+            minutes_elapsed INTEGER NOT NULL,
+            FOREIGN KEY (signal_id) REFERENCES signals (signal_id)
+        )
+        ''')
+        
+        # Tabla de retroalimentación del usuario
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id TEXT NOT NULL,
+            feedback_type TEXT NOT NULL,
+            actual_result TEXT,
+            actual_change REAL,
+            time_to_target INTEGER,
+            user_notes TEXT,
+            feedback_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (signal_id) REFERENCES signals (signal_id)
+        )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        print("✅ Base de datos inicializada correctamente")
+    
+    def save_new_signal(self, symbol: str, signal_data: Dict) -> str:
+        """
+        Guarda una nueva señal del nvbot3
+        Se llama desde tu pipeline de predicción existente
+        """
+        signal_id = f"{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        INSERT INTO signals (
+            signal_id, symbol, signal_type, entry_price, entry_timestamp,
+            predicted_change, confidence_score, expected_timeframe, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            signal_id,
+            symbol,
+            signal_data['type'],
+            signal_data['entry_price'],
+            datetime.now(),
+            signal_data['predicted_change'],
+            signal_data['confidence'],
+            signal_data['expected_timeframe_minutes'],
+            'monitoring'
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"🎯 Señal guardada: {signal_id}")
+        return signal_id
+    
+    def update_price_tracking(self, symbol: str, current_price: float):
+        """
+        Actualiza el tracking de precio para todas las señales activas de un símbolo
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Buscar señales activas de este símbolo
+        cursor.execute('''
+        SELECT signal_id, entry_price, entry_timestamp, expected_timeframe
+        FROM signals 
+        WHERE symbol = ? AND status = 'monitoring'
+        ''', (symbol,))
+        
+        active_signals = cursor.fetchall()
+        
+        for signal_id, entry_price, entry_timestamp, expected_timeframe in active_signals:
+            entry_time = datetime.strptime(entry_timestamp, '%Y-%m-%d %H:%M:%S.%f')
+            minutes_elapsed = int((datetime.now() - entry_time).total_seconds() / 60)
+            change_percent = ((current_price - entry_price) / entry_price) * 100
+            
+            # Guardar punto de tracking
+            cursor.execute('''
+            INSERT INTO price_tracking (
+                signal_id, timestamp, price, change_percent, minutes_elapsed
+            ) VALUES (?, ?, ?, ?, ?)
+            ''', (signal_id, datetime.now(), current_price, change_percent, minutes_elapsed))
+            
+            # Si ya pasó el tiempo esperado, marcar como completado
+            if minutes_elapsed >= expected_timeframe:
+                cursor.execute('''
+                UPDATE signals SET status = 'completed' WHERE signal_id = ?
+                ''', (signal_id,))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_active_signals(self) -> List[Dict]:
+        """Obtiene todas las señales que están siendo monitoreadas"""
+        conn = sqlite3.connect(self.db_path)
+        
+        query = '''
+        SELECT s.*, pt.price as current_price, pt.change_percent as current_change,
+               pt.minutes_elapsed
+        FROM signals s
+        LEFT JOIN price_tracking pt ON s.signal_id = pt.signal_id
+        WHERE s.status IN ('monitoring', 'completed')
+        AND (pt.id IS NULL OR pt.id = (
+            SELECT MAX(id) FROM price_tracking WHERE signal_id = s.signal_id
+        ))
+        ORDER BY s.entry_timestamp DESC
+        '''
+        
+        df = pd.read_sql(query, conn)
+        conn.close()
+        
+        return df.to_dict('records')
+    
+    def save_user_feedback(self, signal_id: str, feedback_data: Dict):
+        """Guarda la retroalimentación del usuario sobre una señal"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        INSERT INTO user_feedback (
+            signal_id, feedback_type, actual_result, actual_change,
+            time_to_target, user_notes
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            signal_id,
+            feedback_data['type'],
+            feedback_data['result'],
+            feedback_data.get('actual_change'),
+            feedback_data.get('time_to_target'),
+            feedback_data.get('notes', '')
+        ))
+        
+        # Marcar señal como con feedback
+        cursor.execute('''
+        UPDATE signals SET status = 'feedback_received' WHERE signal_id = ?
+        ''', (signal_id,))
+        
+        conn.commit()
+        conn.close()
+        print(f"💬 Feedback guardado para {signal_id}")
+    
+    def generate_smart_comment(self, signal_id: str) -> str:
+        """Genera comentarios inteligentes basados en el comportamiento del precio"""
+        conn = sqlite3.connect(self.db_path)
+        
+        query = '''
+        SELECT pt.*, s.entry_price, s.predicted_change, s.expected_timeframe
+        FROM price_tracking pt
+        JOIN signals s ON pt.signal_id = s.signal_id
+        WHERE pt.signal_id = ?
+        ORDER BY pt.minutes_elapsed
+        '''
+        
+        df = pd.read_sql(query, conn, params=(signal_id,))
+        conn.close()
+        
+        if len(df) == 0:
+            return "Monitoreando señal..."
+        
+        # Analizar patrones
+        max_change = df['change_percent'].max()
+        min_change = df['change_percent'].min()
+        final_change = df['change_percent'].iloc[-1]
+        time_elapsed = df['minutes_elapsed'].iloc[-1]
+        
+        # Generar comentario inteligente
+        if abs(final_change) < 1.0:
+            return f"Precio estable ({final_change:+.2f}%) después de {time_elapsed} min"
+        
+        elif final_change > 2.0 and min_change < -1.0:
+            return f"Bajó hasta {min_change:.1f}%, luego subió {final_change:+.1f}%. Patrón dip-and-rally típico."
+        
+        else:
+            return f"Cambio actual {final_change:+.1f}% en {time_elapsed}min. Máximo: {max_change:+.1f}%"
+    
+    def get_performance_stats(self, days: int = 30) -> Dict:
+        """Calcula estadísticas de performance de las señales"""
+        conn = sqlite3.connect(self.db_path)
+        
+        query = '''
+        SELECT s.signal_type, s.confidence_score, s.predicted_change,
+               uf.actual_change, uf.feedback_type
+        FROM signals s
+        JOIN user_feedback uf ON s.signal_id = uf.signal_id
+        WHERE s.entry_timestamp >= datetime('now', '-{} days')
+        '''.format(days)
+        
+        df = pd.read_sql(query, conn)
+        conn.close()
+        
+        if len(df) == 0:
+            return {"total_signals": 0, "success_rate": 0, "average_confidence": 0}
+        
+        stats = {
+            "total_signals": len(df),
+            "success_rate": len(df[df['feedback_type'] == 'success']) / len(df) * 100,
+            "average_confidence": df['confidence_score'].mean(),
+        }
+        
+        return stats
+
+# Test de inicialización
+if __name__ == "__main__":
+    tracker = SignalTracker()
+    print("🎯 SignalTracker inicializado correctamente")
+
+

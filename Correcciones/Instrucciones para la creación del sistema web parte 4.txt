@@ -1,0 +1,106 @@
+Instrucciones para la creación del sistema web parte 4
+
+🚀 FASE 4: INSTRUCCIONES DE EJECUCIÓN
+Paso 4.1: Script de Ejecución Completa
+Crear archivo: scripts/full_setup_and_run.py
+
+#!/usr/bin/env python3
+"""
+Script maestro para configurar y ejecutar todo el sistema de retroalimentación
+Ejecutar UNA SOLA VEZ para configuración completa
+"""
+
+import subprocess
+import sys
+import time
+import os
+from pathlib import Path
+
+def run_command(command, description=""):
+    """Ejecuta un comando y maneja errores"""
+    print(f"\\n🔄 {description}")
+    print(f"   Ejecutando: {command}")
+    
+    try:
+        result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+        print(f"   ✅ {description} completado")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"   ❌ Error en {description}:")
+        print(f"   {e.stderr}")
+        return False
+
+def main():
+    print("🚀 CONFIGURACIÓN COMPLETA DEL SISTEMA DE RETROALIMENTACIÓN")
+    print("=" * 65)
+    
+    # Verificar entorno virtual
+    if 'nvbot3_env' not in sys.executable:
+        print("⚠️ IMPORTANTE: Activa el entorno virtual primero")
+        print("   nvbot3_env\\Scripts\\activate  # Windows")
+        print("   source nvbot3_env/bin/activate  # Linux/Mac")
+        input("\\n📌 Presiona Enter después de activar el entorno...")
+    
+    # 1. Instalar dependencias
+    success = run_command(
+        "pip install flask==2.3.2 flask-socketio==5.3.4 python-socketio==5.8.0",
+        "Instalando dependencias del sistema web"
+    )
+    if not success:
+        print("❌ Error instalando dependencias. Abortando.")
+        return
+    
+    # 2. Ejecutar integración
+    success = run_command(
+        "python scripts/integrate_feedback_system.py",
+        "Creando estructura del sistema de retroalimentación"
+    )
+    if not success:
+        print("❌ Error en la integración. Abortando.")
+        return
+    
+    # 3. Probar el sistema
+    print("\\n🧪 Probando el sistema...")
+    success = run_command(
+        "python scripts/test_feedback_system.py",
+        "Generando señales de prueba"
+    )
+    
+    print("\\n" + "=" * 65)
+    print("🎉 CONFIGURACIÓN COMPLETADA EXITOSAMENTE!")
+    print("=" * 65)
+    
+    print("\\n📋 SISTEMA LISTO - PRÓXIMOS PASOS:")
+    
+    print("\\n1. INICIAR EL DASHBOARD (en terminal separada):")
+    print("   python scripts/start_dashboard.py")
+    
+    print("\\n2. MODIFICAR TU CÓDIGO PRINCIPAL:")
+    print("   # Al inicio de tu archivo:")
+    print("   from integration.nvbot3_feedback_bridge import track_signal")
+    print("   ")
+    print("   # En tu función de predicción:")
+    print("   if prediction['confidence'] > 0.75:")
+    print("       track_signal(symbol, prediction, current_price)")
+    
+    print("\\n3. EJECUTAR TU BOT COMO SIEMPRE:")
+    print("   python tu_script_principal.py")
+    
+    print("\\n4. ABRIR EL DASHBOARD:")
+    print("   http://localhost:5000")
+    
+    print("\\n🎯 RESULTADO:")
+    print("   ✅ Dashboard web funcionando")
+    print("   ✅ Base de datos inicializada")
+    print("   ✅ 5 señales de prueba creadas")
+    print("   ✅ Sistema listo para retroalimentación")
+    
+    print("\\n🚨 IMPORTANTE:")
+    print("   - Mantén el dashboard corriendo en una terminal")
+    print("   - Tu bot funcionará exactamente igual que antes")
+    print("   - Cada señal de alta confianza se guardará automáticamente")
+    print("   - Da feedback desde el dashboard para que el bot aprenda")
+
+if __name__ == "__main__":
+    main()
+

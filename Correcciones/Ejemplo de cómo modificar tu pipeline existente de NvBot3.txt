@@ -1,0 +1,324 @@
+# Ejemplo de cómo modificar tu pipeline existente de NvBot3
+# para incluir tracking automático de señales
+
+"""
+ANTES DE APLICAR ESTAS MODIFICACIONES:
+1. Completa el entrenamiento de tus modelos (model_trainer.py)
+2. Ejecuta el script de integración (integrate_feedback_system.py)
+3. Instala las dependencias adicionales (pip install flask flask-socketio)
+
+DESPUÉS DE APLICAR ESTAS MODIFICACIONES:
+Tendrás un sistema completo que:
+- Detecta oportunidades como siempre
+- Automáticamente guarda cada señal para tracking
+- Monitorea precios en tiempo real  
+- Permite retroalimentación via web
+- Mejora automáticamente con machine learning
+"""
+
+# ==================================================================================
+# EJEMPLO 1: Modificación de tu función principal de predicción
+# ==================================================================================
+
+# TU CÓDIGO ORIGINAL (simplificado para ejemplo)
+def tu_funcion_prediccion_original(symbol, market_data):
+    """Tu función existente que genera predicciones"""
+    
+    # Tu lógica existente...
+    features = calculate_features(market_data)  # Tus 151 features
+    
+    # Tus modelos entrenados
+    momentum_pred = momentum_model.predict(features)
+    rebound_pred = rebound_model.predict(features) 
+    regime_pred = regime_model.predict(features)
+    
+    # Tu lógica de decisión existente
+    if momentum_pred > 0.05 and confidence > 0.75:
+        prediction = {
+            'type': 'momentum',
+            'change': momentum_pred,
+            'confidence': confidence
+        }
+        return prediction
+    
+    return None
+
+# TU CÓDIGO MODIFICADO (con tracking automático)
+def tu_funcion_prediccion_modificada(symbol, market_data):
+    """Tu función existente + tracking automático"""
+    
+    # Tu lógica existente exactamente igual...
+    features = calculate_features(market_data)
+    momentum_pred = momentum_model.predict(features)
+    rebound_pred = rebound_model.predict(features) 
+    regime_pred = regime_model.predict(features)
+    
+    # Tu lógica de decisión existente
+    if momentum_pred > 0.05 and confidence > 0.75:
+        prediction = {
+            'type': 'momentum',
+            'change': momentum_pred,
+            'confidence': confidence
+        }
+        
+        # ====== NUEVA LÍNEA: Guardar para tracking ======
+        save_prediction_to_tracker(symbol, prediction, market_data['close'])
+        # ===============================================
+        
+        return prediction
+    
+    return None
+
+# ==================================================================================
+# EJEMPLO 2: Modificación de tu loop principal de análisis
+# ==================================================================================
+
+# TU LOOP ORIGINAL
+async def tu_loop_principal_original():
+    """Tu loop existente que analiza múltiples símbolos"""
+    
+    symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']  # Tus símbolos
+    
+    while True:
+        for symbol in symbols:
+            try:
+                # Obtener datos de mercado
+                market_data = get_market_data(symbol)
+                
+                # Generar predicción
+                prediction = tu_funcion_prediccion_original(symbol, market_data)
+                
+                if prediction:
+                    print(f"🎯 Señal detectada en {symbol}: {prediction}")
+                    # Aquí podrías enviar notificación, etc.
+                
+            except Exception as e:
+                print(f"Error con {symbol}: {e}")
+        
+        await asyncio.sleep(60)  # Esperar 1 minuto
+
+# TU LOOP MODIFICADO (con tracking automático)
+async def tu_loop_principal_modificado():
+    """Tu loop existente + tracking automático"""
+    
+    symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']
+    
+    while True:
+        for symbol in symbols:
+            try:
+                # Tu lógica existente exactamente igual...
+                market_data = get_market_data(symbol)
+                prediction = tu_funcion_prediccion_modificada(symbol, market_data)
+                
+                if prediction:
+                    print(f"🎯 Señal detectada en {symbol}: {prediction}")
+                    
+                    # ===== LÍNEAS NUEVAS: Feedback automático =====
+                    print(f"📊 Señal guardada para tracking y retroalimentación")
+                    print(f"🌐 Visible en dashboard: http://localhost:5000")
+                    # ===============================================
+                
+            except Exception as e:
+                print(f"Error con {symbol}: {e}")
+        
+        await asyncio.sleep(60)
+
+# ==================================================================================
+# EJEMPLO 3: Cómo añadir tracking a diferentes tipos de señal
+# ==================================================================================
+
+class SignalGenerator:
+    """Ejemplo de cómo organizar tu generador de señales con tracking"""
+    
+    def __init__(self):
+        # Tus modelos existentes
+        self.momentum_model = load_model('momentum')
+        self.rebound_model = load_model('rebound') 
+        self.regime_model = load_model('regime')
+        
+        # Nuevo: tracker de señales
+        from web_dashboard.database.signal_tracker import SignalTracker
+        self.tracker = SignalTracker()
+    
+    def detect_momentum(self, symbol, features, current_price):
+        """Detecta señales de momentum (tu lógica existente)"""
+        
+        prediction = self.momentum_model.predict(features)
+        confidence = calculate_confidence(prediction)
+        
+        if prediction >= 0.05 and confidence >= 0.75:
+            
+            signal_data = {
+                'type': 'momentum_alto',
+                'predicted_change': prediction,
+                'confidence': confidence,
+                'entry_price': current_price,
+                'expected_timeframe_minutes': 240  # 4 horas
+            }
+            
+            # Guardar automáticamente
+            signal_id = self.tracker.save_new_signal(symbol, signal_data)
+            
+            return {
+                'signal_id': signal_id,
+                'type': 'momentum_alto',
+                'change': prediction,
+                'confidence': confidence
+            }
+        
+        return None
+    
+    def detect_rebound(self, symbol, features, current_price):
+        """Detecta rebotes pequeños (tu lógica existente)"""
+        
+        prediction = self.rebound_model.predict(features)
+        confidence = calculate_confidence(prediction)
+        
+        if 0.01 <= prediction <= 0.03 and confidence >= 0.70:
+            
+            signal_data = {
+                'type': 'rebote_pequeño',
+                'predicted_change': prediction,
+                'confidence': confidence,
+                'entry_price': current_price,
+                'expected_timeframe_minutes': 120  # 2 horas
+            }
+            
+            signal_id = self.tracker.save_new_signal(symbol, signal_data)
+            
+            return {
+                'signal_id': signal_id,
+                'type': 'rebote_pequeño', 
+                'change': prediction,
+                'confidence': confidence
+            }
+        
+        return None
+    
+    def detect_regime_change(self, symbol, features, current_price):
+        """Detecta cambios de régimen (tu lógica existente)"""
+        
+        regime_pred = self.regime_model.predict(features)
+        confidence = calculate_confidence(regime_pred)
+        
+        if regime_pred == 'bullish' and confidence >= 0.80:
+            
+            signal_data = {
+                'type': 'cambio_regimen',
+                'predicted_change': 0.0,  # Régimen no predice cambio específico
+                'confidence': confidence,
+                'entry_price': current_price,
+                'expected_timeframe_minutes': 480  # 8 horas
+            }
+            
+            signal_id = self.tracker.save_new_signal(symbol, signal_data)
+            
+            return {
+                'signal_id': signal_id,
+                'type': 'cambio_regimen',
+                'regime': regime_pred,
+                'confidence': confidence
+            }
+        
+        return None
+
+# ==================================================================================
+# EJEMPLO 4: Integración completa en tu main.py o script principal
+# ==================================================================================
+
+async def main_nvbot3_con_retroalimentacion():
+    """
+    Función principal que integra todo tu NvBot3 existente 
+    con el nuevo sistema de retroalimentación
+    """
+    
+    print("🤖 Iniciando NvBot3 con Sistema de Retroalimentación")
+    print("=" * 55)
+    
+    # Tu configuración existente
+    symbols = load_symbols_from_config()  # Tu función existente
+    models = load_trained_models()        # Tu función existente
+    
+    # Nuevo: inicializar generador con tracking
+    signal_generator = SignalGenerator()
+    
+    print(f"📊 Monitoreando {len(symbols)} símbolos")
+    print(f"🌐 Dashboard web disponible en: http://localhost:5000")
+    
+    while True:
+        for symbol in symbols:
+            try:
+                # Tu pipeline existente
+                market_data = fetch_market_data(symbol)  # Tu función
+                features = calculate_features(market_data)  # Tu función
+                current_price = market_data['close']
+                
+                # Detectar diferentes tipos de señales
+                signals = []
+                
+                # Momentum
+                momentum_signal = signal_generator.detect_momentum(symbol, features, current_price)
+                if momentum_signal:
+                    signals.append(momentum_signal)
+                
+                # Rebotes 
+                rebound_signal = signal_generator.detect_rebound(symbol, features, current_price)
+                if rebound_signal:
+                    signals.append(rebound_signal)
+                
+                # Régimen
+                regime_signal = signal_generator.detect_regime_change(symbol, features, current_price)
+                if regime_signal:
+                    signals.append(regime_signal)
+                
+                # Reportar señales detectadas
+                for signal in signals:
+                    print(f"🎯 {symbol}: {signal['type']} - Confianza: {signal['confidence']:.2f}")
+                    print(f"   📊 Tracking ID: {signal['signal_id']}")
+                    print(f"   🌐 Ver en dashboard: http://localhost:5000")
+                
+            except Exception as e:
+                print(f"❌ Error procesando {symbol}: {e}")
+                continue
+        
+        # Tu intervalo existente
+        print(f"⏰ Próximo análisis en 60 segundos...")
+        await asyncio.sleep(60)
+
+# ==================================================================================
+# PASOS PARA APLICAR ESTAS MODIFICACIONES
+# ==================================================================================
+
+"""
+📋 CHECKLIST DE IMPLEMENTACIÓN:
+
+□ 1. Completar entrenamiento de modelos
+   python scripts/model_trainer.py
+
+□ 2. Ejecutar integración del sistema
+   python scripts/integrate_feedback_system.py
+
+□ 3. Instalar nuevas dependencias
+   pip install flask flask-socketio
+
+□ 4. Modificar tu código principal agregando las líneas marcadas arriba
+
+□ 5. Iniciar el sistema completo
+   python scripts/start_nvbot3_with_dashboard.py
+
+□ 6. Abrir http://localhost:5000 en tu navegador
+
+□ 7. Dejar correr el sistema y dar retroalimentación a las señales
+
+□ 8. Después de 100+ feedbacks, el sistema se reentrena automáticamente
+
+🎯 RESULTADO FINAL:
+Tu NvBot3 funcionará exactamente igual que antes, pero ahora:
+- Cada señal se guarda automáticamente
+- Puedes ver todas las señales en una interfaz web bonita  
+- Puedes dar feedback sobre si acertó o falló
+- El sistema aprende de tu feedback y mejora automáticamente
+- Tienes estadísticas de performance en tiempo real
+
+¡Es como agregarle memoria a largo plazo a tu bot! 🧠
+"""

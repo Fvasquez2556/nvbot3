@@ -1,0 +1,633 @@
+Instrucciones para la creación del sistema web parte 2
+
+Paso 2.3: Crear Aplicación Flask
+Crear archivo: web_dashboard/app.py
+
+from flask import Flask, render_template, request, jsonify
+import sqlite3
+import json
+from datetime import datetime, timedelta
+import sys
+import os
+
+# Agregar path del database
+sys.path.append(os.path.join(os.path.dirname(__file__), 'database'))
+from signal_tracker import SignalTracker
+
+# Configuración de Flask
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'nvbot3-secret-key-2025'
+
+# Inicializar componentes
+signal_tracker = SignalTracker()
+
+# Importar configuración de Binance desde nvbot3
+try:
+    sys.path.append('..')  # Para acceder al directorio padre
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    import ccxt
+    exchange = ccxt.binance({
+        'apiKey': os.getenv('BINANCE_API_KEY', ''),
+        'secret': os.getenv('BINANCE_SECRET_KEY', ''),
+        'sandbox': False,
+        'enableRateLimit': True,
+    })
+    print("✅ Conexión a Binance configurada")
+except Exception as e:
+    print(f"⚠️ Warning: No se pudo conectar a Binance: {e}")
+    exchange = None
+
+@app.route('/')
+def dashboard():
+    """Página principal del dashboard"""
+    # Obtener señales activas
+    active_signals = signal_tracker.get_active_signals()
+    
+    # Agregar campos calculados
+    for signal in active_signals:
+        signal['time_progress'] = calculate_time_progress(signal)
+        signal['smart_comment'] = signal_tracker.generate_smart_comment(signal['signal_id'])
+    
+    # Obtener estadísticas
+    stats = signal_tracker.get_performance_stats(days=30)
+    
+    return render_template('dashboard.html', 
+                         signals=active_signals, 
+                         stats=stats,
+                         current_time=datetime.now())
+
+@app.route('/api/signals/active')
+def get_active_signals():
+    """API endpoint para obtener señales activas (AJAX)"""
+    signals = signal_tracker.get_active_signals()
+    
+    # Enriquecer datos
+    for signal in signals:
+        signal['smart_comment'] = signal_tracker.generate_smart_comment(signal['signal_id'])
+        signal['time_progress'] = calculate_time_progress(signal)
+        signal['status_class'] = get_status_class(signal)
+    
+    return jsonify(signals)
+
+@app.route('/api/update_price/<symbol>')
+def update_price(symbol):
+    """Actualizar precio actual de un símbolo"""
+    if exchange is None:
+        return jsonify({'error': 'Exchange not connected'})
+    
+    try:
+        ticker = exchange.fetch_ticker(symbol)
+        current_price = ticker['last']
+        
+        # Actualizar tracking en base de datos
+        signal_tracker.update_price_tracking(symbol, current_price)
+        
+        return jsonify({
+            'symbol': symbol,
+            'price': current_price,
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/api/feedback', methods=['POST'])
+def submit_feedback():
+    """Recibir retroalimentación del usuario"""
+    data = request.get_json()
+    
+    signal_id = data.get('signal_id')
+    feedback_type = data.get('feedback_type')
+    
+    feedback_data = {
+        'type': feedback_type,
+        'result': data.get('result_description', ''),
+        'actual_change': data.get('actual_change'),
+        'time_to_target': data.get('time_to_target'),
+        'notes': data.get('notes', '')
+    }
+    
+    try:
+        signal_tracker.save_user_feedback(signal_id, feedback_data)
+        return jsonify({'status': 'success', 'message': 'Feedback guardado correctamente'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/api/stats/performance')
+def performance_stats():
+    """Estadísticas detalladas de performance"""
+    stats = signal_tracker.get_performance_stats(days=30)
+    return jsonify(stats)
+
+# Funciones auxiliares
+def calculate_time_progress(signal):
+    """Calcula el progreso temporal de una señal"""
+    if not signal.get('minutes_elapsed') or not signal.get('expected_timeframe'):
+        return 0
+    
+    progress = (signal['minutes_elapsed'] / signal['expected_timeframe']) * 100
+    return min(progress, 100)
+
+def get_status_class(signal):
+    """Determina la clase CSS basada en el estado"""
+    if signal.get('status') == 'completed':
+        return 'success' if signal.get('current_change', 0) > 0 else 'danger'
+    elif signal.get('status') == 'monitoring':
+        return 'warning' if calculate_time_progress(signal) > 80 else 'info'
+    else:
+        return 'secondary'
+
+# Actualización automática de precios en background
+def start_price_updates():
+    """Inicia actualizaciones automáticas de precios"""
+    import threading
+    import time
+    
+    def update_loop():
+        while True:
+            try:
+                if exchange:
+                    active_signals = signal_tracker.get_active_signals()
+                    symbols = list(set(signal['symbol'] for signal in active_signals 
+                                     if signal['status'] == 'monitoring'))
+                    
+                    for symbol in symbols:
+                        try:
+                            ticker = exchange.fetch_ticker(symbol)
+                            signal_tracker.update_price_tracking(symbol, ticker['last'])
+                            time.sleep(1)  # Rate limiting
+                        except Exception as e:
+                            print(f"Error actualizando {symbol}: {e}")
+                
+                time.sleep(60)  # Actualizar cada minuto
+                
+            except Exception as e:
+                print(f"Error en background updates: {e}")
+                time.sleep(60)
+    
+    update_thread = threading.Thread(target=update_loop, daemon=True)
+    update_thread.start()
+    print("✅ Monitor de precios iniciado en background")
+
+if __name__ == '__main__':
+    print("🌐 Iniciando NvBot3 Web Dashboard...")
+    
+    # Iniciar actualizaciones automáticas
+    start_price_updates()
+    
+    # Ejecutar la aplicación
+    app.run(host='0.0.0.0', port=5000, debug=True)
+
+
+Paso 2.4: Crear Template HTML Principal
+Crear archivo: web_dashboard/templates/dashboard.html
+
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎯 NvBot3 - Dashboard de Alertas</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --success-color: #27ae60;
+            --danger-color: #e74c3c;
+            --warning-color: #f39c12;
+            --info-color: #3498db;
+        }
+        
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .dashboard-header {
+            background: linear-gradient(135deg, var(--primary-color), #34495e);
+            color: white;
+            padding: 2rem 0;
+            margin-bottom: 2rem;
+        }
+        
+        .signal-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 1rem;
+            transition: transform 0.2s ease;
+        }
+        
+        .signal-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        
+        .confidence-bar {
+            height: 8px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .confidence-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        
+        .time-progress {
+            height: 6px;
+            background-color: #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 0.5rem;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        
+        .smart-comment {
+            background-color: #f8f9fa;
+            border-left: 4px solid var(--info-color);
+            padding: 0.8rem;
+            border-radius: 0 8px 8px 0;
+            margin-top: 1rem;
+            font-style: italic;
+        }
+        
+        .stats-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .btn-feedback {
+            margin: 0.2rem;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="dashboard-header">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h1 class="mb-0">
+                        <i class="fas fa-robot"></i> NvBot3 Dashboard
+                    </h1>
+                    <p class="mb-0 opacity-75">Sistema de Alertas con Retroalimentación Inteligente</p>
+                </div>
+                <div class="col-md-4 text-end">
+                    <div class="d-flex justify-content-end align-items-center">
+                        <div class="me-3">
+                            <small>Última actualización:</small><br>
+                            <span id="last-update">{{ current_time.strftime('%H:%M:%S') }}</span>
+                        </div>
+                        <button class="btn btn-light btn-sm" onclick="refreshData()">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Estadísticas -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <i class="fas fa-chart-line fa-2x text-success mb-2"></i>
+                    <h4>{{ stats.total_signals or 0 }}</h4>
+                    <small class="text-muted">Señales Totales</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <i class="fas fa-bullseye fa-2x text-primary mb-2"></i>
+                    <h4>{{ "%.1f"|format(stats.success_rate or 0) }}%</h4>
+                    <small class="text-muted">Tasa de Éxito</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <i class="fas fa-eye fa-2x text-info mb-2"></i>
+                    <h4 id="monitoring-count">{{ signals|selectattr("status", "equalto", "monitoring")|list|length }}</h4>
+                    <small class="text-muted">Monitoreando</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <i class="fas fa-clock fa-2x text-warning mb-2"></i>
+                    <h4>{{ "%.0f"|format((stats.average_confidence or 0) * 100) }}%</h4>
+                    <small class="text-muted">Confianza Promedio</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Control de Auto-refresh -->
+        <div class="row mb-3">
+            <div class="col-md-12 text-end">
+                <div class="form-check form-switch d-inline-block">
+                    <input class="form-check-input" type="checkbox" id="auto-refresh" checked>
+                    <label class="form-check-label" for="auto-refresh">
+                        Auto-actualizar (30s)
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lista de Señales -->
+        <div id="signals-container">
+            {% if signals %}
+                {% for signal in signals %}
+                <div class="signal-card">
+                    <div class="card-header">
+                        <div class="row align-items-center">
+                            <div class="col-md-6">
+                                <h5 class="mb-1">
+                                    <i class="fas fa-coins text-warning"></i>
+                                    {{ signal.symbol }}
+                                </h5>
+                                <small class="text-muted">
+                                    <i class="fas fa-clock"></i>
+                                    {{ signal.entry_timestamp }}
+                                </small>
+                            </div>
+                            <div class="col-md-6 text-end">
+                                <span class="badge bg-{% if signal.status == 'monitoring' %}info{% elif signal.status == 'completed' %}success{% else %}secondary{% endif %}">
+                                    {{ signal.status|title }}
+                                </span>
+                                <div class="mt-1">
+                                    <strong>
+                                        {% if signal.current_change %}
+                                            {{ "{:+.2f}".format(signal.current_change) }}%
+                                        {% else %}
+                                            N/A
+                                        {% endif %}
+                                        actual
+                                    </strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="mb-2">
+                                    <strong>{{ signal.signal_type|title }}</strong> - 
+                                    <span class="text-success">{{ "{:+.1f}".format(signal.predicted_change) }}%</span>
+                                    predicho
+                                </div>
+                                
+                                <div class="mb-2">
+                                    <small>Precio entrada: <strong>${{ "%.4f"|format(signal.entry_price) }}</strong></small>
+                                    {% if signal.current_price %}
+                                    <br><small>Precio actual: <strong>${{ "%.4f"|format(signal.current_price) }}</strong></small>
+                                    {% endif %}
+                                </div>
+                                
+                                <!-- Barra de confianza -->
+                                <div class="mb-2">
+                                    <div class="d-flex justify-content-between">
+                                        <small>Confianza:</small>
+                                        <small><strong>{{ "%.0f"|format(signal.confidence_score * 100) }}%</strong></small>
+                                    </div>
+                                    <div class="confidence-bar">
+                                        <div class="confidence-fill bg-{% if signal.confidence_score >= 0.8 %}success{% elif signal.confidence_score >= 0.6 %}warning{% else %}danger{% endif %}" 
+                                             style="width: {{ signal.confidence_score * 100 }}%"></div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Progreso temporal -->
+                                {% if signal.minutes_elapsed and signal.expected_timeframe %}
+                                <div class="mb-2">
+                                    {% set time_progress = (signal.minutes_elapsed / signal.expected_timeframe * 100)|round %}
+                                    <div class="d-flex justify-content-between">
+                                        <small>Progreso temporal:</small>
+                                        <small><strong>{{ time_progress }}%</strong></small>
+                                    </div>
+                                    <div class="time-progress">
+                                        <div class="progress-fill bg-info" style="width: {{ time_progress if time_progress <= 100 else 100 }}%"></div>
+                                    </div>
+                                </div>
+                                {% endif %}
+                                
+                                <!-- Comentario inteligente -->
+                                {% if signal.smart_comment %}
+                                <div class="smart-comment">
+                                    <i class="fas fa-brain text-primary"></i>
+                                    {{ signal.smart_comment }}
+                                </div>
+                                {% endif %}
+                            </div>
+                            
+                            <div class="col-md-4">
+                                <!-- Botones de retroalimentación -->
+                                {% if signal.status != 'feedback_received' %}
+                                <div class="d-grid gap-2">
+                                    <button class="btn btn-success btn-feedback" 
+                                            onclick="showFeedbackModal('{{ signal.signal_id }}', 'success')">
+                                        <i class="fas fa-thumbs-up"></i> Éxito
+                                    </button>
+                                    <button class="btn btn-warning btn-feedback" 
+                                            onclick="showFeedbackModal('{{ signal.signal_id }}', 'partial')">
+                                        <i class="fas fa-meh"></i> Parcial
+                                    </button>
+                                    <button class="btn btn-danger btn-feedback" 
+                                            onclick="showFeedbackModal('{{ signal.signal_id }}', 'failed')">
+                                        <i class="fas fa-thumbs-down"></i> Falló
+                                    </button>
+                                </div>
+                                {% else %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-check"></i> Feedback recibido
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-search fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No hay señales activas</h5>
+                    <p class="text-muted">Las señales aparecerán aquí cuando tu NvBot3 detecte oportunidades</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Modal para Feedback -->
+    <div class="modal fade" id="feedbackModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Dar Retroalimentación</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="feedback-form">
+                        <input type="hidden" id="feedback-signal-id">
+                        
+                        <div class="mb-3">
+                            <label class="form-label">¿Cómo resultó la predicción?</label>
+                            <div class="btn-group w-100" role="group">
+                                <input type="radio" class="btn-check" name="feedback_type" id="success" value="success">
+                                <label class="btn btn-outline-success" for="success">
+                                    <i class="fas fa-check"></i> Éxito
+                                </label>
+                                
+                                <input type="radio" class="btn-check" name="feedback_type" id="partial" value="partial">
+                                <label class="btn btn-outline-warning" for="partial">
+                                    <i class="fas fa-minus"></i> Parcial
+                                </label>
+                                
+                                <input type="radio" class="btn-check" name="feedback_type" id="failed" value="failed">
+                                <label class="btn btn-outline-danger" for="failed">
+                                    <i class="fas fa-times"></i> Falló
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="actual-change" class="form-label">Cambio Real (%)</label>
+                            <input type="number" class="form-control" id="actual-change" step="0.1" placeholder="ej: +3.2">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="time-to-target" class="form-label">Tiempo hasta el objetivo (minutos)</label>
+                            <input type="number" class="form-control" id="time-to-target" placeholder="ej: 45">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="feedback-notes" class="form-label">Comentarios adicionales</label>
+                            <textarea class="form-control" id="feedback-notes" rows="3" placeholder="Describe lo que observaste..."></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" onclick="submitFeedback()">
+                        <i class="fas fa-save"></i> Guardar Feedback
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        let autoRefreshInterval;
+
+        // Inicializar
+        document.addEventListener('DOMContentLoaded', function() {
+            setupAutoRefresh();
+        });
+
+        // Auto-refresh cada 30 segundos
+        function setupAutoRefresh() {
+            const checkbox = document.getElementById('auto-refresh');
+            
+            if (checkbox.checked) {
+                autoRefreshInterval = setInterval(refreshData, 30000);
+            }
+            
+            checkbox.addEventListener('change', function() {
+                if (this.checked) {
+                    autoRefreshInterval = setInterval(refreshData, 30000);
+                } else {
+                    clearInterval(autoRefreshInterval);
+                }
+            });
+        }
+
+        // Refrescar datos
+        function refreshData() {
+            location.reload();
+        }
+
+        // Mostrar modal de feedback
+        function showFeedbackModal(signalId, type = null) {
+            document.getElementById('feedback-signal-id').value = signalId;
+            
+            if (type) {
+                document.getElementById(type).checked = true;
+            }
+            
+            const modal = new bootstrap.Modal(document.getElementById('feedbackModal'));
+            modal.show();
+        }
+
+        // Enviar feedback
+        async function submitFeedback() {
+            const signalId = document.getElementById('feedback-signal-id').value;
+            const feedbackType = document.querySelector('input[name="feedback_type"]:checked')?.value;
+            
+            if (!feedbackType) {
+                alert('Por favor selecciona un tipo de resultado');
+                return;
+            }
+            
+            const feedbackData = {
+                signal_id: signalId,
+                feedback_type: feedbackType,
+                actual_change: parseFloat(document.getElementById('actual-change').value) || null,
+                time_to_target: parseInt(document.getElementById('time-to-target').value) || null,
+                notes: document.getElementById('feedback-notes').value,
+                result_description: `Feedback: ${feedbackType}`
+            };
+            
+            try {
+                const response = await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(feedbackData)
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    bootstrap.Modal.getInstance(document.getElementById('feedbackModal')).hide();
+                    document.getElementById('feedback-form').reset();
+                    
+                    // Mostrar éxito y recargar
+                    alert('Feedback guardado correctamente');
+                    setTimeout(() => location.reload(), 1000);
+                    
+                } else {
+                    alert(result.message || 'Error al guardar feedback');
+                }
+                
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error al enviar feedback');
+            }
+        }
+
+        // Actualizar timestamp
+        setInterval(() => {
+            document.getElementById('last-update').textContent = 
+                new Date().toLocaleTimeString('es-ES');
+        }, 1000);
+    </script>
+</body>
+</html>
