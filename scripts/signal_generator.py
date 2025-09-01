@@ -33,6 +33,7 @@ from integration.nvbot3_feedback_bridge import track_signal, update_price
 
 # Data processing components
 from src.data.feature_calculator import FeatureCalculator
+from src.data.feature_selector import FeatureSelector
 
 # Configurar logging
 logging.basicConfig(
@@ -49,8 +50,12 @@ class NvBot3SignalGenerator:
         self.models_path = Path(models_path)
         self.config_path = Path(config_path)
         
+        # Load configuration from YAML
+        self._load_config()
+        
         # Initialize components
         self.feature_calculator = FeatureCalculator()
+        self.feature_selector = FeatureSelector()
         self.exchange = None
         self.loaded_models = {}
         
@@ -113,15 +118,38 @@ class NvBot3SignalGenerator:
             ]
         }
         
-        # Trading symbols from config
-        self.symbols = [
-            'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT',
-            'XRPUSDT', 'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'AVAXUSDT'
-        ]
-        
-        self.timeframes = ['5m', '15m', '1h', '4h', '1d']
-        
         logger.info("🤖 NvBot3 Signal Generator initialized")
+    
+    def _load_config(self):
+        """Load configuration from YAML file"""
+        try:
+            import yaml
+            with open(self.config_path, 'r') as f:
+                config = yaml.safe_load(f)
+            
+            # Get all symbols from tiers
+            data_config = config.get('data', {})
+            symbols_config = data_config.get('symbols', {})
+            
+            # Combine all tiers
+            tier_1 = symbols_config.get('tier_1', [])
+            tier_2 = symbols_config.get('tier_2', [])  
+            tier_3 = symbols_config.get('tier_3', [])
+            
+            self.symbols = tier_1 + tier_2 + tier_3
+            self.timeframes = data_config.get('timeframes', ['5m', '15m', '1h', '4h', '1d'])
+            
+            logger.info(f"📊 Loaded {len(self.symbols)} symbols from config: {len(tier_1)} tier1 + {len(tier_2)} tier2 + {len(tier_3)} tier3")
+            logger.info(f"🕐 Timeframes: {self.timeframes}")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load config, using default symbols: {e}")
+            # Fallback to default symbols
+            self.symbols = [
+                'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT',
+                'XRPUSDT', 'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'AVAXUSDT'
+            ]
+            self.timeframes = ['5m', '15m', '1h', '4h', '1d']
     
     def initialize_exchange(self):
         """Initialize Binance exchange connection"""
@@ -244,20 +272,36 @@ class NvBot3SignalGenerator:
             # Fallback to basic features if FeatureCalculator fails
             return self._calculate_basic_features_fallback(df)
     
-    def verify_feature_compatibility(self, features_df: pd.DataFrame) -> Dict[str, List[str]]:
-        """Verify which models have compatible features available"""
+    def verify_feature_compatibility(self, features_df: pd.DataFrame, symbol: str, timeframe: str) -> Dict[str, Dict]:
+        """Verify which models have compatible features available using FeatureSelector"""
         compatibility = {}
         
-        for model_type, expected_features in self.model_features.items():
-            available = [f for f in expected_features if f in features_df.columns]
-            missing = [f for f in expected_features if f not in features_df.columns]
-            
-            compatibility[model_type] = {
-                'available': len(available),
-                'expected': len(expected_features),
-                'missing': missing,
-                'compatibility_rate': len(available) / len(expected_features)
-            }
+        for model_type in self.model_types.keys():
+            try:
+                # Get required features for this model
+                required_features = self.feature_selector.get_required_features(model_type, symbol, timeframe)
+                available_features = list(features_df.columns)
+                
+                # Check compatibility
+                found_features, missing_features = self.feature_selector.validate_features(
+                    available_features, required_features
+                )
+                
+                compatibility[model_type] = {
+                    'available': len(found_features),
+                    'expected': len(required_features),
+                    'missing': missing_features,
+                    'compatibility_rate': len(found_features) / len(required_features) if required_features else 0
+                }
+                
+            except Exception as e:
+                logger.warning(f"Could not check compatibility for {model_type}: {e}")
+                compatibility[model_type] = {
+                    'available': 0,
+                    'expected': 0,
+                    'missing': [],
+                    'compatibility_rate': 0.0
+                }
         
         return compatibility
     
@@ -277,8 +321,8 @@ class NvBot3SignalGenerator:
             
             # RSI
             delta = df_with_features['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            gain = (delta.where(delta.gt(0), 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta.lt(0), 0)).rolling(window=14).mean()
             rs = gain / loss
             df_with_features['rsi_14'] = 100 - (100 / (1 + rs))
             
@@ -305,8 +349,8 @@ class NvBot3SignalGenerator:
             logger.error(f"❌ Error in fallback feature calculation: {e}")
             return df
     
-    def make_prediction(self, model: Any, features: pd.DataFrame, model_type: str) -> Optional[Dict]:
-        """Make a prediction using the loaded model with EXACT feature selection from training"""
+    def make_prediction(self, model: Any, features: pd.DataFrame, model_type: str, symbol: str, timeframe: str) -> Optional[Dict]:
+        """Make a prediction using the loaded model with FeatureSelector compatibility layer"""
         try:
             # Get the latest feature row for prediction
             if len(features) == 0:
@@ -315,23 +359,22 @@ class NvBot3SignalGenerator:
             
             latest_features = features.iloc[-1:].copy()
             
-            # USE EXACT FEATURE SELECTION FROM TRAINING
-            expected_features = self.model_features[model_type]
-            
-            # Check which expected features are available
-            available_features = [f for f in expected_features if f in latest_features.columns]
-            missing_features = [f for f in expected_features if f not in latest_features.columns]
-            
-            if missing_features:
-                logger.error(f"❌ Missing features for {model_type}: {missing_features[:5]}...")
-                logger.error(f"   Expected: {len(expected_features)} features, Available: {len(available_features)}")
+            # USE FEATURESELECTOR FOR EXACT COMPATIBILITY
+            try:
+                # Select features using FeatureSelector
+                selected_features = self.feature_selector.select_features(
+                    latest_features, model_type, symbol, timeframe, strict=True
+                )
+                
+                logger.info(f"✅ FeatureSelector: Selected {len(selected_features.columns)} features for {model_type}")
+                logger.debug(f"   Model: {symbol}_{timeframe}_{model_type}")
+                logger.debug(f"   Sample features: {list(selected_features.columns)[:5]}...")
+                
+                X = selected_features.copy()
+                
+            except Exception as e:
+                logger.error(f"❌ FeatureSelector failed for {model_type}: {e}")
                 return None
-            
-            # Select ONLY the exact features the model was trained with
-            X = latest_features[expected_features].copy()
-            
-            logger.info(f"✅ Using exact feature selection: {len(expected_features)} features for {model_type}")
-            logger.debug(f"   Features: {expected_features[:5]}...")
             
             # Handle different model types
             if model_type == 'regime' and isinstance(model, dict):
@@ -346,7 +389,7 @@ class NvBot3SignalGenerator:
                     
                     # Create sequence (use last sequence_length rows)
                     if len(features) >= sequence_length:
-                        recent_features = features.iloc[-sequence_length:][feature_columns]
+                        recent_features = features.iloc[-sequence_length:][selected_features.columns]
                         X_sequence = scaler.transform(recent_features)
                         X_sequence = X_sequence.reshape(1, sequence_length, -1)
                         
@@ -430,7 +473,7 @@ class NvBot3SignalGenerator:
             features_df = self.calculate_features(market_data)
             
             # Verify feature compatibility
-            compatibility = self.verify_feature_compatibility(features_df)
+            compatibility = self.verify_feature_compatibility(features_df, symbol, timeframe)
             logger.info(f"🔍 Feature compatibility check:")
             for model_type, comp in compatibility.items():
                 rate = comp['compatibility_rate']
@@ -448,7 +491,7 @@ class NvBot3SignalGenerator:
                         continue
                     
                     # Make prediction
-                    prediction = self.make_prediction(model, features_df, model_type)
+                    prediction = self.make_prediction(model, features_df, model_type, symbol, timeframe)
                     if prediction is None:
                         continue
                     
@@ -488,6 +531,10 @@ class NvBot3SignalGenerator:
             symbols = self.symbols[:5]  # Limit to first 5 symbols for testing
         if timeframes is None:
             timeframes = ['5m', '1h']  # Limit to key timeframes
+        
+        # Type checker assertions
+        assert symbols is not None
+        assert timeframes is not None
         
         logger.info(f"🚀 Starting signal scan for {len(symbols)} symbols x {len(timeframes)} timeframes")
         

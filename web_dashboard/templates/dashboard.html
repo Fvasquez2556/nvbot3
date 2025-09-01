@@ -432,8 +432,8 @@
                                     <div class="metric-label">Precio Entrada</div>
                                 </div>
                                 <div class="metric">
-                                    <div class="metric-value {% if signal.current_change > 0 %}text-success{% else %}text-danger{% endif %}">
-                                        {% if signal.current_change %}
+                                    <div class="metric-value {% if signal.current_change and signal.current_change > 0 %}text-success{% elif signal.current_change and signal.current_change < 0 %}text-danger{% else %}text-muted{% endif %}">
+                                        {% if signal.current_change and not (signal.current_change != signal.current_change) %}
                                             {{ "{:+.2f}".format(signal.current_change) }}%
                                         {% else %}
                                             0.00%
@@ -467,15 +467,20 @@
                             </div>
 
                             <!-- Progreso temporal -->
-                            {% if signal.minutes_elapsed and signal.expected_timeframe %}
+                            {% if signal.minutes_elapsed and signal.expected_timeframe and signal.expected_timeframe > 0 %}
                             <div class="progress-container">
                                 <div class="d-flex justify-content-between mb-1">
                                     <small class="text-muted">Tiempo Transcurrido</small>
-                                    <small class="text-muted">{{ signal.minutes_elapsed }}min / {{ signal.expected_timeframe }}min</small>
+                                    <small class="text-muted">
+                                        {% set elapsed = signal.minutes_elapsed or 0 %}
+                                        {% set expected = signal.expected_timeframe or 1 %}
+                                        {{ elapsed }}min / {{ expected }}min
+                                    </small>
                                 </div>
                                 <div class="time-progress">
+                                    {% set time_progress = (elapsed / expected * 100) if expected > 0 else 0 %}
                                     <div class="progress-fill dynamic-width" 
-                                        data-width="{{ (signal.minutes_elapsed / signal.expected_timeframe * 100) if signal.minutes_elapsed and signal.expected_timeframe else 0 }}"></div>
+                                        data-width="{{ time_progress|round(1) }}"></div>
                                 </div>
                             </div>
                             {% endif %}
@@ -484,7 +489,7 @@
                             <div class="smart-comment">
                                 <i class="fas fa-comment-alt me-2 text-info"></i>
                                 <span id="comment-{{ signal.signal_id }}">
-                                    {% if signal.current_change %}
+                                    {% if signal.current_change and not (signal.current_change != signal.current_change) %}
                                         {% if signal.current_change > 2 %}
                                             🚀 Señal desarrollándose positivamente (+{{ "%.1f"|format(signal.current_change) }}%)
                                         {% elif signal.current_change > 0.5 %}

@@ -165,7 +165,13 @@ class SignalTracker:
                     entry_time = datetime.strptime(entry_timestamp, '%Y-%m-%d %H:%M:%S')
                 
                 minutes_elapsed = int((datetime.now() - entry_time).total_seconds() / 60)
-                change_percent = ((current_price - entry_price) / entry_price) * 100
+                
+                # NaN protection for percentage calculation
+                if entry_price and entry_price != 0 and current_price is not None:
+                    change_percent = ((current_price - entry_price) / entry_price) * 100
+                else:
+                    change_percent = 0.0
+                    print(f"⚠️ Warning: Invalid prices for {symbol} - entry: {entry_price}, current: {current_price}")
                 
                 # Guardar punto de tracking
                 cursor.execute('''
@@ -273,6 +279,10 @@ class SignalTracker:
             final_change = df['change_percent'].iloc[-1]
             time_elapsed = df['minutes_elapsed'].iloc[-1]
             
+            # NaN protection for comment generation
+            if pd.isna(final_change) or pd.isna(max_change) or pd.isna(min_change):
+                return "⏳ Monitoreando evolución de la señal..."
+            
             # Generar comentario inteligente
             if abs(final_change) < 1.0:
                 return f"Precio estable ({final_change:+.2f}%) después de {time_elapsed} min"
@@ -304,10 +314,16 @@ class SignalTracker:
             if len(df) == 0:
                 return {"total_signals": 0, "success_rate": 0, "average_confidence": 0}
             
+            # NaN protection for statistics
+            total_signals = len(df)
+            success_count = len(df[df['feedback_type'] == 'success']) if total_signals > 0 else 0
+            success_rate = (success_count / total_signals * 100) if total_signals > 0 else 0.0
+            average_confidence = df['confidence_score'].mean() if total_signals > 0 else 0.0
+            
             stats = {
-                "total_signals": len(df),
-                "success_rate": len(df[df['feedback_type'] == 'success']) / len(df) * 100,
-                "average_confidence": df['confidence_score'].mean(),
+                "total_signals": total_signals,
+                "success_rate": success_rate if not pd.isna(success_rate) else 0.0,
+                "average_confidence": average_confidence if not pd.isna(average_confidence) else 0.0,
             }
             
             return stats
