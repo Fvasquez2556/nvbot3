@@ -73,10 +73,10 @@ class SignalTracker:
             
             conn.commit()
             conn.close()
-            print("✅ Base de datos SignalTracker inicializada correctamente")
+            print("SUCCESS: Base de datos SignalTracker inicializada correctamente")
             
         except Exception as e:
-            print(f"❌ Error inicializando base de datos: {e}")
+            print(f"ERROR: Error inicializando base de datos: {e}")
     
     def save_new_signal(self, symbol: str, signal_data: Dict) -> str:
         """
@@ -135,11 +135,11 @@ class SignalTracker:
             conn.commit()
             conn.close()
             
-            print(f"🎯 Señal guardada: {signal_id}")
+            print(f"SUCCESS: Señal guardada: {signal_id}")
             return signal_id
             
         except Exception as e:
-            print(f"❌ Error guardando señal: {e}")
+            print(f"ERROR: Error guardando señal: {e}")
             return ""
     
     def update_price_tracking(self, symbol: str, current_price: float):
@@ -187,7 +187,7 @@ class SignalTracker:
                 print(f"💹 Precio actualizado para {len(active_signals)} señales de {symbol}")
                 
         except Exception as e:
-            print(f"❌ Error actualizando precio de {symbol}: {e}")
+            print(f"ERROR: Error actualizando precio de {symbol}: {e}")
     
     def get_active_signals(self) -> List[Dict]:
         """Obtiene todas las señales que están siendo monitoreadas"""
@@ -212,7 +212,7 @@ class SignalTracker:
             return df.to_dict('records')
             
         except Exception as e:
-            print(f"❌ Error obteniendo señales activas: {e}")
+            print(f"ERROR: Error obteniendo señales activas: {e}")
             return []
     
     def save_user_feedback(self, signal_id: str, feedback_data: Dict):
@@ -246,7 +246,7 @@ class SignalTracker:
             print(f"💬 Feedback guardado para {signal_id}")
             
         except Exception as e:
-            print(f"❌ Error guardando feedback: {e}")
+            print(f"ERROR: Error guardando feedback: {e}")
     
     def generate_smart_comment(self, signal_id: str) -> str:
         """Genera comentarios inteligentes basados en el comportamiento del precio"""
@@ -282,7 +282,7 @@ class SignalTracker:
                 return f"Cambio actual {final_change:+.1f}% en {time_elapsed}min. Máximo: {max_change:+.1f}%"
                 
         except Exception as e:
-            print(f"❌ Error generando comentario: {e}")
+            print(f"ERROR: Error generando comentario: {e}")
             return "Error generando comentario"
     
     def get_performance_stats(self, days: int = 30) -> Dict:
@@ -313,14 +313,14 @@ class SignalTracker:
             return stats
             
         except Exception as e:
-            print(f"❌ Error calculando estadísticas: {e}")
+            print(f"ERROR: Error calculando estadísticas: {e}")
             return {"total_signals": 0, "success_rate": 0, "average_confidence": 0}
 
 # Test de inicialización
 if __name__ == "__main__":
     try:
         tracker = SignalTracker()
-        print("🎯 SignalTracker inicializado correctamente")
+        print("SUCCESS: SignalTracker inicializado correctamente")
         
         # Test básico
         test_data = {
@@ -335,4 +335,4 @@ if __name__ == "__main__":
             print(f"✅ Test exitoso: {signal_id}")
         
     except Exception as e:
-        print(f"❌ Error en test: {e}")
+        print(f"ERROR: Error en test: {e}")

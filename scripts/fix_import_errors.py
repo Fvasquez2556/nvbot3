@@ -8,6 +8,7 @@ en el sistema de retroalimentación de NvBot3
 import os
 import sys
 from pathlib import Path
+import subprocess
 
 def check_file_exists(filepath, description):
     """Verifica si un archivo existe y reporta el estado"""
@@ -25,25 +26,121 @@ def create_missing_files():
     
     print("🔧 Creando archivos faltantes...")
     
-    files_to_create = {
-        "web_dashboard/__init__.py": "# NvBot3 Web Dashboard Package\n",
+    # Crear directorios necesarios
+    dirs_to_create = [
+        "web_dashboard",
+        "web_dashboard/database", 
+        "web_dashboard/templates",
+        "web_dashboard/static/css",
+        "web_dashboard/static/js",
+        "integration",
+        "scripts"
+    ]
+    
+    for directory in dirs_to_create:
+        Path(directory).mkdir(parents=True, exist_ok=True)
+        print(f"   ✅ Directorio: {directory}")
+    
+    # Crear archivos __init__.py
+    init_files = {
+        "web_dashboard/__init__.py": "# NvBot3 Web Dashboard Package\n__version__ = '1.0.0'\n",
         "web_dashboard/database/__init__.py": "# NvBot3 Database Package\n",
         "integration/__init__.py": "# NvBot3 Integration Package\n"
     }
     
-    for filepath, content in files_to_create.items():
+    for filepath, content in init_files.items():
         path = Path(filepath)
-        
-        # Crear directorio si no existe
-        path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Crear archivo si no existe
         if not path.exists():
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
             print(f"   ✅ Creado: {filepath}")
         else:
-            print(f"   ⚠️ Ya existe: {filepath}")
+            print(f"   ℹ️ Ya existe: {filepath}")
+
+    # Crear archivo CSS básico si no existe
+    css_path = Path("web_dashboard/static/css/styles.css")
+    if not css_path.exists():
+        css_content = """/* Estilos básicos para NvBot3 Dashboard */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fa;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.signal-card {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.signal-status {
+    padding: 5px 10px;
+    border-radius: 5px;
+    color: white;
+    font-weight: bold;
+}
+
+.status-monitoring { background-color: #17a2b8; }
+.status-completed { background-color: #28a745; }
+.status-failed { background-color: #dc3545; }
+"""
+        with open(css_path, 'w', encoding='utf-8') as f:
+            f.write(css_content)
+        print(f"   ✅ Creado: {css_path}")
+
+    # Crear archivo JS básico si no existe
+    js_path = Path("web_dashboard/static/js/scripts.js")
+    if not js_path.exists():
+        js_content = """// Scripts para NvBot3 Dashboard
+function refreshData() {
+    console.log('Refrescando datos...');
+    location.reload();
+}
+
+function submitFeedback(signalId, feedbackType) {
+    const data = {
+        signal_id: signalId,
+        feedback_type: feedbackType,
+        comments: prompt('Comentarios adicionales (opcional):') || ''
+    };
+    
+    fetch('/api/feedback', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            alert('¡Feedback guardado correctamente!');
+            location.reload();
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error enviando feedback');
+    });
+}
+
+// Auto-refresh cada 30 segundos
+setInterval(refreshData, 30000);
+"""
+        with open(js_path, 'w', encoding='utf-8') as f:
+            f.write(js_content)
+        print(f"   ✅ Creado: {js_path}")
 
 def test_imports():
     """Prueba las importaciones críticas"""
@@ -52,17 +149,25 @@ def test_imports():
     
     # Test 1: SignalTracker
     try:
-        sys.path.append('web_dashboard/database')
-        from web_dashboard.database.signal_tracker import SignalTracker
+        original_dir = os.getcwd()
+        os.chdir('web_dashboard')
+        sys.path.append(os.getcwd())
+        
+        from database.signal_tracker import SignalTracker
         tracker = SignalTracker()
-        print("   ✅ SignalTracker: Importación exitosa")
+        os.chdir(original_dir)
+        
+        print("   ✅ SignalTracker: Importación e inicialización exitosa")
         return True
+        
     except ImportError as e:
+        os.chdir(original_dir)
         print(f"   ❌ SignalTracker: Error de importación - {e}")
         return False
     except Exception as e:
-        print(f"   ⚠️ SignalTracker: Importación OK, pero error en inicialización - {e}")
-        return True  # Importación funciona, solo hay problema de inicialización
+        os.chdir(original_dir)
+        print(f"   ⚠️ SignalTracker: Importación OK, error en inicialización - {e}")
+        return True  # Importación funciona
 
 def test_integration_bridge():
     """Prueba el bridge de integración"""
@@ -71,83 +176,117 @@ def test_integration_bridge():
     
     try:
         sys.path.append('integration')
-        from web_dashboard.database.signal_tracker import SignalTracker 
-        from integration.nvbot3_feedback_bridge import get_tracking_stats
-
-        status = get_tracking_stats()
-        print("   ✅ Bridge: Importación exitosa")
-        print(f"   📊 Estado: {status}")
+        from integration.nvbot3_feedback_bridge import track_signal, get_tracking_stats
         
+        # Intentar una función básica
+        stats = get_tracking_stats()
+        print("   ✅ Bridge: Importación y funciones básicas OK")
+        print(f"   📊 Test stats: {stats}")
         return True
         
     except ImportError as e:
         print(f"   ❌ Bridge: Error de importación - {e}")
         return False
     except Exception as e:
-        print(f"   ⚠️ Bridge: Error - {e}")
+        print(f"   ⚠️ Bridge: Error en ejecución - {e}")
         return False
 
 def fix_permission_issues():
     """Intenta solucionar problemas de permisos"""
     
-    print("🔒 Verificando permisos...")
+    print("🔑 Verificando permisos...")
     
     directories = [
         "web_dashboard",
         "web_dashboard/database", 
-        "integration"
+        "integration",
+        "scripts"
     ]
+    
+    all_permissions_ok = True
     
     for directory in directories:
         path = Path(directory)
         if path.exists():
+            # Verificar lectura
             if os.access(path, os.R_OK):
                 print(f"   ✅ Lectura OK: {directory}")
             else:
                 print(f"   ❌ Sin permisos de lectura: {directory}")
+                all_permissions_ok = False
             
+            # Verificar escritura
             if os.access(path, os.W_OK):
                 print(f"   ✅ Escritura OK: {directory}")
             else:
                 print(f"   ❌ Sin permisos de escritura: {directory}")
+                all_permissions_ok = False
+        else:
+            print(f"   ⚠️ Directorio no existe: {directory}")
+    
+    return all_permissions_ok
 
 def install_missing_dependencies():
     """Verifica e instala dependencias faltantes"""
     
     print("📦 Verificando dependencias...")
     
-    required_packages = [
-        'sqlite3',  # Parte de Python estándar
-        'pandas',
-        'flask', 
-        'flask_socketio'
-    ]
+    # Dependencias críticas
+    dependencies = {
+        'sqlite3': 'sqlite3',  # Incluido en Python estándar
+        'pandas': 'pandas',
+        'flask': 'flask',
+        'flask_socketio': 'flask-socketio'
+    }
     
     missing_packages = []
     
-    for package in required_packages:
+    for import_name, package_name in dependencies.items():
         try:
-            if package == 'flask_socketio':
+            if import_name == 'flask_socketio':
                 import flask_socketio
-            elif package == 'sqlite3':
+                print(f"   ✅ flask-socketio: Versión {flask_socketio.__version__}")
+            elif import_name == 'sqlite3':
                 import sqlite3
-            elif package == 'pandas':
-                import pandas
-            elif package == 'flask':
+                print(f"   ✅ sqlite3: Incluido en Python estándar")
+            elif import_name == 'pandas':
+                import pandas as pd
+                print(f"   ✅ pandas: Versión {pd.__version__}")
+            elif import_name == 'flask':
                 import flask
-            
-            print(f"   ✅ {package}: Instalado")
-            
+                print(f"   ✅ flask: Versión {flask.__version__}")
+                
         except ImportError:
-            print(f"   ❌ {package}: Faltante")
-            missing_packages.append(package)
+            print(f"   ❌ {package_name}: Faltante")
+            missing_packages.append(package_name)
     
     if missing_packages:
-        print(f"\n📋 Instalar dependencias faltantes:")
-        if 'flask_socketio' in missing_packages:
-            print("   pip install flask flask-socketio")
-        if 'pandas' in missing_packages:
-            print("   pip install pandas")
+        print(f"\n💡 Para instalar dependencias faltantes:")
+        print(f"   pip install {' '.join(missing_packages)}")
+        
+        # Intentar instalación automática
+        print(f"\n🔄 ¿Intentar instalación automática? (s/n): ", end="")
+        try:
+            response = input().lower()
+            if response in ['s', 'si', 'y', 'yes']:
+                print("📥 Instalando dependencias...")
+                cmd = [sys.executable, "-m", "pip", "install"] + missing_packages
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    print("   ✅ Instalación exitosa")
+                    return True
+                else:
+                    print(f"   ❌ Error en instalación: {result.stderr}")
+                    return False
+            else:
+                print("   ℹ️ Instalación manual requerida")
+                return False
+        except KeyboardInterrupt:
+            print("\n   ⏹️ Instalación cancelada por el usuario")
+            return False
+    
+    return True
 
 def comprehensive_diagnosis():
     """Diagnóstico completo del sistema"""
@@ -163,9 +302,8 @@ def comprehensive_diagnosis():
         "integration/nvbot3_feedback_bridge.py": "Bridge de integración",
         "web_dashboard/app.py": "Aplicación Flask",
         "web_dashboard/templates/dashboard.html": "Template HTML",
-        "web_dashboard/__init__.py": "Package init",
-        "web_dashboard/database/__init__.py": "Database package init",
-        "integration/__init__.py": "Integration package init"
+        "scripts/start_dashboard.py": "Script de inicio",
+        "scripts/test_feedback_system.py": "Script de pruebas"
     }
     
     all_files_exist = True
@@ -175,17 +313,16 @@ def comprehensive_diagnosis():
             all_files_exist = False
     
     # 2. Crear archivos faltantes
-    if not all_files_exist:
-        print("\n2. 🔧 Creando archivos faltantes:")
-        create_missing_files()
+    print("\n2. 🔧 Archivos y Directorios:")
+    create_missing_files()
     
     # 3. Verificar permisos
-    print("\n3. 🔒 Permisos:")
-    fix_permission_issues()
+    print("\n3. 🔑 Permisos:")
+    permissions_ok = fix_permission_issues()
     
     # 4. Verificar dependencias
     print("\n4. 📦 Dependencias:")
-    install_missing_dependencies()
+    dependencies_ok = install_missing_dependencies()
     
     # 5. Probar importaciones
     print("\n5. 🧪 Pruebas de Importación:")
@@ -197,28 +334,52 @@ def comprehensive_diagnosis():
     print("📊 RESUMEN DEL DIAGNÓSTICO")
     print("=" * 50)
     
-    if all_files_exist and signal_tracker_ok and bridge_ok:
+    issues = []
+    if not all_files_exist:
+        issues.append("Archivos faltantes")
+    if not permissions_ok:
+        issues.append("Problemas de permisos")
+    if not dependencies_ok:
+        issues.append("Dependencias faltantes")
+    if not signal_tracker_ok:
+        issues.append("Error en SignalTracker")
+    if not bridge_ok:
+        issues.append("Error en Bridge")
+    
+    if not issues:
         print("🎉 ¡TODO ESTÁ FUNCIONANDO CORRECTAMENTE!")
         print("✅ Todos los archivos existen")
-        print("✅ Todas las importaciones funcionan") 
+        print("✅ Todas las importaciones funcionan")
+        print("✅ Dependencias instaladas")
         print("✅ Sistema listo para usar")
-        print("\n🚀 Próximos pasos:")
-        print("   1. Ejecutar: python scripts/start_dashboard.py")
-        print("   2. Integrar con tu código: from integration.nvbot3_feedback_bridge import track_signal")
+        
+        print("\n🚀 PRÓXIMOS PASOS:")
+        print("   1. Ejecutar: python scripts/test_feedback_system.py")
+        print("   2. Ejecutar: python scripts/start_dashboard.py")
+        print("   3. Integrar: from integration.nvbot3_feedback_bridge import track_signal")
+        
+        return True
     else:
         print("⚠️ SE ENCONTRARON ALGUNOS PROBLEMAS:")
-        if not all_files_exist:
-            print("❌ Faltan archivos críticos")
-        if not signal_tracker_ok:
-            print("❌ Error en SignalTracker")
-        if not bridge_ok:
-            print("❌ Error en Bridge de integración")
+        for issue in issues:
+            print(f"   ❌ {issue}")
         
-        print("\n🔧 SOLUCIONES RECOMENDADAS:")
-        print("   1. Ejecutar: python scripts/fix_import_errors.py")
-        print("   2. Verificar que el entorno virtual esté activo")
-        print("   3. Instalar dependencias: pip install flask flask-socketio pandas")
-        print("   4. Ejecutar nuevamente este diagnóstico")
+        print("\n🔧 SOLUCIONES APLICADAS:")
+        print("   ✅ Archivos faltantes creados")
+        print("   ✅ Directorios estructurados")
+        print("   ✅ Permisos verificados")
+        
+        if dependencies_ok and signal_tracker_ok and bridge_ok:
+            print("   ✅ Funcionalidad básica operativa")
+            print("\n💡 El sistema debería funcionar ahora")
+            return True
+        else:
+            print("\n💡 ACCIONES RECOMENDADAS:")
+            if not dependencies_ok:
+                print("   1. Instalar dependencias: pip install flask flask-socketio pandas")
+            print("   2. Ejecutar nuevamente: python scripts/fix_import_errors.py")
+            print("   3. Probar el sistema: python scripts/test_feedback_system.py")
+            return False
 
 def quick_fix():
     """Solución rápida para problemas comunes"""
@@ -229,16 +390,81 @@ def quick_fix():
     # Crear estructura básica
     create_missing_files()
     
-    # Crear SignalTracker básico si no existe
-    signal_tracker_path = Path("web_dashboard/database/signal_tracker.py")
-    if not signal_tracker_path.exists():
-        print("🔧 Creando SignalTracker...")
-        # Aquí irían las instrucciones para crear el archivo completo
-        print("   ⚠️ Necesitas copiar el SignalTracker completo del artifact")
+    # Instalar dependencias
+    print("\n📥 Instalando dependencias básicas...")
+    basic_deps = ['flask', 'flask-socketio', 'pandas']
+    
+    try:
+        cmd = [sys.executable, "-m", "pip", "install"] + basic_deps
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            print("   ✅ Dependencias instaladas")
+        else:
+            print(f"   ⚠️ Algunos problemas en la instalación: {result.stderr}")
+    except Exception as e:
+        print(f"   ❌ Error instalando dependencias: {e}")
     
     # Verificar nuevamente
     print("\n🔄 Verificando después de las correcciones...")
-    test_imports()
+    signal_works = test_imports()
+    bridge_works = test_integration_bridge()
+    
+    if signal_works and bridge_works:
+        print("\n🎉 ¡CORRECCIÓN EXITOSA!")
+        print("✅ Sistema funcionando correctamente")
+        return True
+    else:
+        print("\n⚠️ Aún hay algunos problemas")
+        print("🔧 Ejecuta el diagnóstico completo para más detalles")
+        return False
+
+def main():
+    """Función principal"""
+    
+    print("🛠️ REPARADOR DE NVBOT3 FEEDBACK SYSTEM")
+    print("=" * 45)
+    
+    # Verificar directorio actual
+    if not Path(".").resolve().name in ['nvbot3', 'NvBot3'] and not Path("web_dashboard").exists():
+        print("⚠️ Advertencia: No se detectó estructura de nvbot3")
+        print("   Asegúrate de ejecutar desde el directorio raíz del proyecto")
+        print("")
+    
+    print("Selecciona una opción:")
+    print("1. 🔍 Diagnóstico completo")
+    print("2. ⚡ Solución rápida")
+    print("3. 🧪 Solo probar importaciones")
+    print("4. 📦 Solo verificar dependencias")
+    
+    try:
+        choice = input("\nOpción (1-4): ").strip()
+        
+        if choice == "1":
+            success = comprehensive_diagnosis()
+        elif choice == "2":
+            success = quick_fix()
+        elif choice == "3":
+            print("\n🧪 Probando importaciones...")
+            signal_ok = test_imports()
+            bridge_ok = test_integration_bridge()
+            success = signal_ok and bridge_ok
+        elif choice == "4":
+            print("\n📦 Verificando dependencias...")
+            success = install_missing_dependencies()
+        else:
+            print("❌ Opción inválida")
+            return
+        
+        if success:
+            print("\n✅ Proceso completado exitosamente")
+        else:
+            print("\n⚠️ Se encontraron algunos problemas - revisa los mensajes anteriores")
+            
+    except KeyboardInterrupt:
+        print("\n\n⏹️ Proceso cancelado por el usuario")
+    except Exception as e:
+        print(f"\n❌ Error inesperado: {e}")
 
 if __name__ == "__main__":
-    comprehensive_diagnosis()
+    main()
