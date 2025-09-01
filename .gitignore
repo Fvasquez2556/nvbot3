@@ -209,3 +209,5 @@ draft/
 # Excluir carpetas y archivos específicos
 /data/checkpoints/
 data/models/
+# Ignore Claude folder
+.claude/
