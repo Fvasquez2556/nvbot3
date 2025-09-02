@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NvBot3 - Dashboard de Trading Inteligente</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Dashboard CSS -->
+    <link href="{{ url_for('static', filename='css/dashboard.css') }}" rel="stylesheet">
+    
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+</head>
+<body>
+    <!-- Header Principal -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-robot me-2"></i>
+                NvBot3 Trading Dashboard
+            </a>
+            
+            <!-- Navegación de pestañas -->
+            <div class="navbar-nav ms-auto">
+                <ul class="nav nav-pills nav-dark" id="dashboard-tabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="realtime-tab" data-bs-toggle="pill" data-bs-target="#realtime-panel" type="button" role="tab">
+                            <i class="fas fa-chart-line me-1"></i>
+                            Tiempo Real
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="analysis-tab" data-bs-toggle="pill" data-bs-target="#analysis-panel" type="button" role="tab">
+                            <i class="fas fa-history me-1"></i>
+                            Análisis Histórico
+                        </button>
+                    </li>
+                </ul>
+                
+                <!-- Estado de conexión -->
+                <div class="navbar-text ms-3 connection-status">
+                    <span class="status-dot"></span>
+                    <span id="connection-status">Conectando...</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <!-- Contenido de las pestañas -->
+        <div class="tab-content" id="dashboard-content">
+            
+            <!-- PANEL 1: TIEMPO REAL -->
+            <div class="tab-pane fade show active" id="realtime-panel" role="tabpanel">
+                <!-- Estadísticas principales -->
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="metric-card">
+                            <div class="metric-value" id="total-signals">{{ stats.total_signals if stats else 0 }}</div>
+                            <div class="metric-label">Total Señales</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-card">
+                            <div class="metric-value" id="momentum-count">{{ categorized_signals.momentum|length if categorized_signals.momentum else 0 }}</div>
+                            <div class="metric-label">Momentum</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-card">
+                            <div class="metric-value" id="rebound-count">{{ categorized_signals.rebounds|length if categorized_signals.rebounds else 0 }}</div>
+                            <div class="metric-label">Rebotes</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-card">
+                            <div class="metric-value" id="trend-count">{{ categorized_signals.trending|length if categorized_signals.trending else 0 }}</div>
+                            <div class="metric-label">Tendencias</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Top Coins Alta Confianza -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="section-card">
+                            <h4 class="section-title">
+                                <i class="fas fa-star text-warning me-2"></i>
+                                Top Coins - Mayor Confianza de Subida
+                            </h4>
+                            <div class="row" id="top-coins-container">
+                                {% if top_confidence_coins %}
+                                    {% for coin in top_confidence_coins %}
+                                        <div class="col-md-2 mb-3">
+                                            <div class="coin-card">
+                                                <div class="coin-symbol">{{ coin.symbol if coin.symbol else coin.get('symbol', 'N/A') }}</div>
+                                                <div class="confidence-badge">{{ ((coin.confidence_score if coin.confidence_score else coin.get('confidence_score', 0)) * 100)|round(1) }}%</div>
+                                                <div class="mt-2">
+                                                    <small>+{{ (coin.predicted_change if coin.predicted_change else coin.get('predicted_change', 0))|round(2) }}%</small><br>
+                                                    <small>${{ (coin.entry_price if coin.entry_price else coin.get('entry_price', 0))|round(6) }}</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="no-data">No hay señales de alta confianza disponibles</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Señales por Categoría -->
+                <div class="row">
+                    <!-- Momentum -->
+                    <div class="col-md-4 mb-4">
+                        <div class="section-card">
+                            <h5 class="section-title">
+                                <i class="fas fa-rocket text-success me-2"></i>
+                                Señales Momentum
+                                <span class="badge bg-success">{{ categorized_signals.momentum|length if categorized_signals.momentum else 0 }}</span>
+                            </h5>
+                            <div id="momentum-signals">
+                                {% if categorized_signals.momentum %}
+                                    {% for signal in categorized_signals.momentum %}
+                                        <div class="signal-item">
+                                            <div class="signal-info">
+                                                <div class="signal-symbol">{{ signal.symbol if signal.symbol else signal.get('symbol', 'N/A') }}</div>
+                                                <div class="signal-details">
+                                                    {{ signal.signal_type or 'momentum' }} • {% if signal.predicted_change or signal.get('predicted_change') %}+{{ (signal.predicted_change if signal.predicted_change else signal.get('predicted_change', 0))|round(2) }}%{% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="signal-metrics">
+                                                <div class="confidence-bar">
+                                                    <div class="confidence-fill {% set conf = signal.confidence_score if signal.confidence_score else signal.get('confidence_score', 0) %}{% if conf > 0.8 %}confidence-high{% elif conf > 0.6 %}confidence-medium{% else %}confidence-low{% endif %}" 
+                                                         data-confidence="{{ conf }}"></div>
+                                                </div>
+                                                <div>{{ (conf * 100)|round(1) }}%</div>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="no-data">No hay señales de momentum</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Rebotes -->
+                    <div class="col-md-4 mb-4">
+                        <div class="section-card">
+                            <h5 class="section-title">
+                                <i class="fas fa-chart-line text-primary me-2"></i>
+                                Señales Rebound
+                                <span class="badge bg-primary">{{ categorized_signals.rebounds|length if categorized_signals.rebounds else 0 }}</span>
+                            </h5>
+                            <div id="rebound-signals">
+                                {% if categorized_signals.rebounds %}
+                                    {% for signal in categorized_signals.rebounds %}
+                                        <div class="signal-item">
+                                            <div class="signal-info">
+                                                <div class="signal-symbol">{{ signal.symbol if signal.symbol else signal.get('symbol', 'N/A') }}</div>
+                                                <div class="signal-details">
+                                                    rebound • {% if signal.predicted_change or signal.get('predicted_change') %}+{{ (signal.predicted_change if signal.predicted_change else signal.get('predicted_change', 0))|round(2) }}%{% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="signal-metrics">
+                                                <div class="confidence-bar">
+                                                    <div class="confidence-fill {% set conf = signal.confidence_score if signal.confidence_score else signal.get('confidence_score', 0) %}{% if conf > 0.8 %}confidence-high{% elif conf > 0.6 %}confidence-medium{% else %}confidence-low{% endif %}" 
+                                                         data-confidence="{{ conf }}"></div>
+                                                </div>
+                                                <div>{{ (conf * 100)|round(1) }}%</div>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="no-data">No hay señales de rebound</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tendencias -->
+                    <div class="col-md-4 mb-4">
+                        <div class="section-card">
+                            <h5 class="section-title">
+                                <i class="fas fa-trending-up text-info me-2"></i>
+                                Señales Trending
+                                <span class="badge bg-info">{{ categorized_signals.trending|length if categorized_signals.trending else 0 }}</span>
+                            </h5>
+                            <div id="trend-signals">
+                                {% if categorized_signals.trending %}
+                                    {% for signal in categorized_signals.trending %}
+                                        <div class="signal-item">
+                                            <div class="signal-info">
+                                                <div class="signal-symbol">{{ signal.symbol if signal.symbol else signal.get('symbol', 'N/A') }}</div>
+                                                <div class="signal-details">
+                                                    trend • {% if signal.trend_direction or signal.get('trend_direction') %}{{ signal.trend_direction if signal.trend_direction else signal.get('trend_direction', 'up') }}{% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="signal-metrics">
+                                                <div class="confidence-bar">
+                                                    <div class="confidence-fill {% set conf = signal.confidence_score if signal.confidence_score else signal.get('confidence_score', 0) %}{% if conf > 0.8 %}confidence-high{% elif conf > 0.6 %}confidence-medium{% else %}confidence-low{% endif %}" 
+                                                         data-confidence="{{ conf }}"></div>
+                                                </div>
+                                                <div>{{ (conf * 100)|round(1) }}%</div>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="no-data">No hay señales de tendencia</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Símbolos Escaneados -->
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="section-card">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <small class="text-muted">
+                                        Símbolos escaneados: <span id="scanned-count">{{ categorized_signals.scanned_symbols|length if categorized_signals.scanned_symbols else 0 }}</span>
+                                    </small>
+                                </div>
+                                <div>
+                                    <small class="text-muted" id="last-update">
+                                        Última actualización: {{ current_time.strftime('%H:%M:%S') if current_time else '...' }}
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PANEL 2: ANÁLISIS HISTÓRICO -->
+            <div class="tab-pane fade" id="analysis-panel" role="tabpanel">
+                <!-- Estadísticas Históricas -->
+                <div class="row mb-4">
+                    <div class="col-md-3 mb-3">
+                        <div class="metric-card">
+                            <i class="fas fa-chart-line fa-2x text-success"></i>
+                            <div class="metric-value text-success">{{ stats.total_signals or 0 }}</div>
+                            <small class="text-muted">Señales Históricas</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="metric-card">
+                            <i class="fas fa-bullseye fa-2x text-primary"></i>
+                            <div class="metric-value text-primary">{{ "%.1f"|format(stats.success_rate or 0) }}%</div>
+                            <small class="text-muted">Tasa de Éxito</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="metric-card">
+                            <i class="fas fa-brain fa-2x text-warning"></i>
+                            <div class="metric-value text-warning">{{ "%.2f"|format(stats.average_confidence or 0) }}</div>
+                            <small class="text-muted">Confianza Promedio</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="metric-card">
+                            <i class="fas fa-eye fa-2x text-info"></i>
+                            <div class="metric-value text-info" id="active-count">
+                                {{ active_signals|length if active_signals else 0 }}
+                            </div>
+                            <small class="text-muted">Señales Activas</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Señales con Feedback -->
+                <div id="historical-signals-container">
+                    {% if active_signals and active_signals|length > 0 %}
+                        <div class="row">
+                            {% for signal in active_signals %}
+                            <div class="col-md-6 col-lg-4 mb-3">
+                                <div class="signal-card" id="signal-{{ signal.signal_id }}">
+                                    <div class="signal-header">
+                                        <div class="signal-symbol">{{ signal.symbol }}</div>
+                                        <div class="signal-status status-monitoring">
+                                            Monitoreando
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="signal-metrics">
+                                        <div class="metric">
+                                            <div class="metric-value">{{ "%.2f"|format(signal.confidence_score if signal.confidence_score else signal.get('confidence_score', 0)) }}</div>
+                                            <div class="metric-label">Confianza</div>
+                                        </div>
+                                        <div class="metric">
+                                            <div class="metric-value">+{{ "%.2f"|format(signal.predicted_change if signal.predicted_change else signal.get('predicted_change', 0)) }}%</div>
+                                            <div class="metric-label">Predicción</div>
+                                        </div>
+                                        <div class="metric">
+                                            <div class="metric-value">${{ "%.6f"|format(signal.entry_price if signal.entry_price else signal.get('entry_price', 0)) }}</div>
+                                            <div class="metric-label">Precio Entrada</div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="progress-container">
+                                        {% set conf = signal.confidence_score if signal.confidence_score else signal.get('confidence_score', 0) %}
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <small>Confianza</small>
+                                            <small>{{ "%.1f"|format(conf * 100) }}%</small>
+                                        </div>
+                                        <div class="confidence-bar">
+                                            <div class="confidence-fill {% if conf > 0.8 %}confidence-high{% elif conf > 0.6 %}confidence-medium{% else %}confidence-low{% endif %}" 
+                                                 data-confidence="{{ conf }}"></div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Botones de feedback -->
+                                    <div class="btn-group w-100 mt-3" role="group">
+                                        <button type="button" class="btn btn-success btn-feedback" 
+                                                onclick="submitFeedback('{{ signal.signal_id }}', 'success')" title="Señal exitosa">
+                                            <i class="fas fa-check"></i> Exitosa
+                                        </button>
+                                        <button type="button" class="btn btn-warning btn-feedback" 
+                                                onclick="submitFeedback('{{ signal.signal_id }}', 'partial')" title="Parcialmente exitosa">
+                                            <i class="fas fa-minus"></i> Parcial
+                                        </button>
+                                        <button type="button" class="btn btn-danger btn-feedback" 
+                                                onclick="submitFeedback('{{ signal.signal_id }}', 'failed')" title="Señal fallida">
+                                            <i class="fas fa-times"></i> Fallida
+                                        </button>
+                                    </div>
+                                    
+                                    <div class="smart-comment mt-3" id="comment-{{ signal.signal_id }}">
+                                        🤖 Esperando resultado para aprender y mejorar las predicciones...
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <!-- Estado vacío -->
+                        <div class="text-center py-5">
+                            <i class="fas fa-chart-bar fa-4x text-muted mb-3"></i>
+                            <h3>No hay señales históricas</h3>
+                            <p class="text-muted">Las señales de tu NvBot3 con feedback aparecerán aquí.</p>
+                            <div class="mt-3">
+                                <small class="text-muted">
+                                    Integra el sistema de feedback para comenzar a analizar el rendimiento.
+                                </small>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+
+                <!-- Instrucciones de Integración -->
+                <div class="row mt-5">
+                    <div class="col-12">
+                        <div class="alert alert-info">
+                            <h5><i class="fas fa-info-circle me-2"></i>Integración con NvBot3</h5>
+                            <p class="mb-2">Para usar ambas funcionalidades, agrega esto a tu código:</p>
+                            <pre class="bg-dark text-light p-3 rounded"><code># Para tracking de señales en tiempo real:
+from integration.nvbot3_feedback_bridge import track_signal
+
+# En tu función de predicción:
+if prediction['confidence'] > 0.75:
+    track_signal(symbol, prediction, current_price)</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/theme-manager.js') }}"></script>
+    
+    <!-- Script adicional para feedback -->
+    <script>
+        // Función para enviar retroalimentación (panel análisis histórico)
+        function submitFeedback(signalId, feedbackType) {
+            console.log(`📝 Enviando feedback: ${signalId} - ${feedbackType}`);
+            
+            const comments = prompt('Comentarios adicionales (opcional):') || '';
+            
+            const feedbackData = {
+                signal_id: signalId,
+                feedback_type: feedbackType,
+                comments: comments,
+                timestamp: new Date().toISOString()
+            };
+            
+            fetch('/api/feedback', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(feedbackData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Mostrar mensaje de éxito
+                    showNotification('¡Feedback guardado correctamente! 📝', 'success');
+                    
+                    // Actualizar el estado de la tarjeta
+                    updateSignalCard(signalId, feedbackType);
+                } else {
+                    showNotification('Error guardando feedback: ' + data.message, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showNotification('Error de conexión al enviar feedback', 'error');
+            });
+        }
+
+        // Función para mostrar notificaciones
+        function showNotification(message, type) {
+            const notification = document.createElement('div');
+            notification.className = `alert alert-${type === 'success' ? 'success' : 'danger'} position-fixed`;
+            notification.style.cssText = 'top: 20px; right: 20px; z-index: 2000; min-width: 300px;';
+            notification.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>${message}</span>
+                    <button type="button" class="btn-close" onclick="this.parentElement.parentElement.remove()"></button>
+                </div>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 5000);
+        }
+
+        // Función para actualizar tarjeta después del feedback
+        function updateSignalCard(signalId, feedbackType) {
+            const card = document.getElementById(`signal-${signalId}`);
+            if (card) {
+                const comment = document.getElementById(`comment-${signalId}`);
+                if (comment) {
+                    const feedbackMessages = {
+                        'success': '✅ Marcada como exitosa por el usuario',
+                        'partial': '⚠️ Marcada como parcialmente exitosa',
+                        'failed': '❌ Marcada como fallida por el usuario'
+                    };
+                    comment.innerHTML = feedbackMessages[feedbackType] || 'Feedback recibido';
+                }
+                
+                const feedbackButtons = card.querySelector('.btn-group');
+                if (feedbackButtons) {
+                    feedbackButtons.style.opacity = '0.5';
+                    feedbackButtons.style.pointerEvents = 'none';
+                }
+            }
+        }
+    </script>
+</body>
+</html>

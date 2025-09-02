@@ -1,9 +1,18 @@
 """
-🚀 NvBot3 Signal Generator - Main Trading Signal Detection
-=========================================================
+🚀 NvBot3 Signal Generator - Real-Time Continuous Market Scanner
+==============================================================
 
-This is the main script that generates live trading signals using trained models.
-Integrates with the web dashboard to track signals automatically.
+Sistema de monitoreo continuo que escanea el mercado en tiempo real 24/7.
+Detecta señales de trading en múltiples timeframes simultáneamente.
+Se integra con el dashboard web para visualización en tiempo real.
+
+Características nuevas:
+🔄 Monitoreo continuo sin intervención manual
+📊 Escaneo de 30+ monedas entrenadas + 30 adicionales
+⏱️ Múltiples timeframes: 3m, 5m, 15m, 1h, 4h
+🎯 Detección automática de tendencias, subidas y rebotes
+💰 Precios de referencia: Binance + precio óptimo calculado
+📈 Actualización en tiempo real del dashboard
 
 Models:
 🔥 Momentum Model (XGBoost): Detectar movimientos alcistas ≥5%
@@ -24,8 +33,11 @@ import time
 import pickle
 import ccxt
 import warnings
+import threading
+import queue
 from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime
+from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 warnings.filterwarnings('ignore')
 
 # Import the integration bridge for dashboard tracking
@@ -43,8 +55,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class NvBot3SignalGenerator:
-    """Main signal generator that uses trained models to detect trading opportunities"""
+class NvBot3RealTimeScanner:
+    """Sistema de escaneo en tiempo real mejorado con monitoreo continuo"""
     
     def __init__(self, models_path: str = "data/models", config_path: str = "config/training_config.yaml"):
         self.models_path = Path(models_path)
@@ -59,27 +71,49 @@ class NvBot3SignalGenerator:
         self.exchange = None
         self.loaded_models = {}
         
-        # Model configurations
+        # Configuración de monitoreo continuo
+        self.is_running = False
+        self.scan_queue = queue.Queue()
+        self.results_queue = queue.Queue()
+        
+        # Timeframes optimizados para detección
+        self.active_timeframes = ['3m', '5m', '15m', '1h', '4h']
+        
+        # Cache de precios para optimización
+        self.price_cache = {}
+        self.last_cache_update = {}
+        
+        # Threading configuration
+        self.max_workers = 8  # Número de threads para procesamiento paralelo
+        
+        # Configurar símbolos expandidos
+        self._setup_expanded_symbols()
+        
+        # Model configurations with enhanced thresholds
         self.model_types = {
             'momentum': {
                 'description': '🔥 Momentum Model: Detectar movimientos ≥5%',
                 'threshold': 0.75,
-                'target_change': 5.0
+                'target_change': 5.0,
+                'category': 'momentum'
             },
             'rebound': {
                 'description': '⚡ Rebound Model: Predecir rebotes 1-3%',
                 'threshold': 0.70,
-                'target_change': 2.0
+                'target_change': 2.0,
+                'category': 'rebound'
             },
             'regime': {
                 'description': '📊 Regime Model: Clasificar tendencia de mercado',
                 'threshold': 0.60,
-                'target_change': 0.0  # Classification, not price change
+                'target_change': 0.0,
+                'category': 'trend'
             },
             'momentum_advanced': {
                 'description': '🎯 Advanced Momentum: Momentum con filtros',
                 'threshold': 0.80,
-                'target_change': 5.0
+                'target_change': 5.0,
+                'category': 'momentum'
             }
         }
         
@@ -117,8 +151,37 @@ class NvBot3SignalGenerator:
                 'price_above_sma_20', 'distance_to_support_10', 'stoch_k_20', 'williams_r_20', 'momentum_score'
             ]
         }
+        logger.info("🤖 NvBot3 Real-Time Scanner initialized")
+    
+    def _setup_expanded_symbols(self):
+        """Configurar lista expandida de símbolos (entrenados + adicionales)"""
+        # Símbolos adicionales para monitoreo (30 nuevas monedas populares)
+        additional_symbols = [
+            # DeFi y Layer 1s populares
+            'ATOMUSDT', 'ALGOUSDT', 'FTMUSDT', 'NEARUSDT', 'HBARUSDT',
+            'FLOWUSDT', 'ICPUSDT', 'FILUSDT', 'VETUSDT', 'EGLDUSDT',
+            
+            # Gaming y NFTs
+            'AXSUSDT', 'GALAUSDT', 'GMTUSDT', 'APECUSDT', 'LDOUSDT',
+            
+            # Meme coins y trending
+            'DOGEUSDT', 'SHIBUSDT', 'PEPEUSDT', 'FLOKIUSDT', 'BONKUSDT',
+            
+            # Layer 2 y Scaling
+            'OPUSDT', 'ARBUSDT', 'STRKUSDT', 'POLSUSDT', 'LRCUSDT',
+            
+            # Nuevos proyectos populares
+            'APTUSDT', 'SUIUSDT', 'LDTUSDT', 'RNDRUSDT', 'INJUSDT'
+        ]
         
-        logger.info("🤖 NvBot3 Signal Generator initialized")
+        # Combinar símbolos entrenados + adicionales
+        self.trained_symbols = self.symbols.copy()
+        self.all_symbols = self.symbols + additional_symbols
+        
+        logger.info(f"📊 Símbolos configurados:")
+        logger.info(f"   🎯 Entrenados: {len(self.trained_symbols)} símbolos")
+        logger.info(f"   🔍 Adicionales: {len(additional_symbols)} símbolos")
+        logger.info(f"   📈 Total: {len(self.all_symbols)} símbolos")
     
     def _load_config(self):
         """Load configuration from YAML file"""
@@ -199,6 +262,399 @@ class NvBot3SignalGenerator:
         except Exception as e:
             logger.error(f"❌ Error loading model {model_key}: {e}")
             return None
+    
+    def get_optimal_price_reference(self, symbol: str, market_data: pd.DataFrame) -> Dict[str, Any]:
+        """Calcular precios de referencia: Binance actual + precio óptimo"""
+        try:
+            current_price = float(market_data['close'].iloc[-1])
+            
+            # Precio de Binance (actual)
+            binance_price = current_price
+            
+            # Calcular precio óptimo basado en análisis técnico
+            # Usar múltiples indicadores para determinar precio justo
+            
+            # 1. Media ponderada de diferentes MAs
+            sma_20 = market_data['close'].rolling(20).mean().iloc[-1]
+            ema_20 = market_data['close'].ewm(span=20).mean().iloc[-1]
+            sma_50 = market_data['close'].rolling(50).mean().iloc[-1]
+            
+            # 2. Bollinger Bands para rango de precio
+            bb_middle = sma_20
+            bb_std = market_data['close'].rolling(20).std().iloc[-1]
+            bb_upper = bb_middle + (bb_std * 2)
+            bb_lower = bb_middle - (bb_std * 2)
+            
+            # 3. RSI para determinar sobre/subcompra
+            delta = market_data['close'].diff()
+            gain = (delta.where(delta.gt(0), 0)).rolling(14).mean().iloc[-1]
+            loss = (-delta.where(delta.lt(0), 0)).rolling(14).mean().iloc[-1]
+            rs = gain / loss if loss != 0 else float('inf')
+            rsi = 100 - (100 / (1 + rs))
+            
+            # 4. Calcular precio óptimo ponderado
+            weights = [0.3, 0.3, 0.25, 0.15]  # SMA20, EMA20, SMA50, BB_middle
+            optimal_price = (
+                sma_20 * weights[0] + 
+                ema_20 * weights[1] + 
+                sma_50 * weights[2] + 
+                bb_middle * weights[3]
+            )
+            
+            # 5. Ajuste por RSI (si está sobrecomprado/sobrevendido)
+            if rsi > 70:  # Sobrecomprado
+                optimal_price = optimal_price * 0.98  # 2% descuento
+            elif rsi < 30:  # Sobrevendido
+                optimal_price = optimal_price * 1.02  # 2% premium
+            
+            # 6. Calcular diferencia porcentual
+            price_diff_pct = ((current_price - optimal_price) / optimal_price) * 100
+            
+            return {
+                'binance_price': round(binance_price, 6),
+                'optimal_price': round(optimal_price, 6),
+                'price_difference_pct': round(price_diff_pct, 2),
+                'bb_upper': round(bb_upper, 6),
+                'bb_lower': round(bb_lower, 6),
+                'rsi': round(rsi, 2),
+                'price_analysis': {
+                    'is_overvalued': price_diff_pct > 5,
+                    'is_undervalued': price_diff_pct < -5,
+                    'is_fair': abs(price_diff_pct) <= 5,
+                    'recommendation': self._get_price_recommendation(price_diff_pct, rsi)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error calculating price reference for {symbol}: {e}")
+            current_price = float(market_data['close'].iloc[-1])
+            return {
+                'binance_price': current_price,
+                'optimal_price': current_price,
+                'price_difference_pct': 0.0,
+                'bb_upper': current_price,
+                'bb_lower': current_price,
+                'rsi': 50.0,
+                'price_analysis': {
+                    'is_overvalued': False,
+                    'is_undervalued': False,
+                    'is_fair': True,
+                    'recommendation': 'hold'
+                }
+            }
+    
+    def _get_price_recommendation(self, price_diff_pct: float, rsi: float) -> str:
+        """Generar recomendación basada en análisis de precio"""
+        if price_diff_pct > 10 and rsi > 70:
+            return 'strong_sell'
+        elif price_diff_pct > 5 and rsi > 60:
+            return 'sell'
+        elif price_diff_pct < -10 and rsi < 30:
+            return 'strong_buy'
+        elif price_diff_pct < -5 and rsi < 40:
+            return 'buy'
+        else:
+            return 'hold'
+    
+    def update_price_cache(self, symbol: str, price_data: Dict):
+        """Actualizar cache de precios con timestamp"""
+        self.price_cache[symbol] = {
+            **price_data,
+            'timestamp': datetime.now(),
+            'last_update': time.time()
+        }
+        
+        # Limpiar cache antiguo (mayor a 5 minutos)
+        current_time = time.time()
+        expired_symbols = [
+            s for s, data in self.price_cache.items() 
+            if current_time - data.get('last_update', 0) > 300
+        ]
+        
+        for symbol in expired_symbols:
+            del self.price_cache[symbol]
+    
+    def get_cached_price(self, symbol: str) -> Optional[Dict]:
+        """Obtener precio del cache si está disponible y fresco"""
+        if symbol in self.price_cache:
+            data = self.price_cache[symbol]
+            # Verificar si el cache tiene menos de 1 minuto
+            if time.time() - data.get('last_update', 0) < 60:
+                return data
+        return None
+    
+    def start_continuous_monitoring(self, update_interval_seconds: int = 180):
+        """Iniciar monitoreo continuo del mercado (cada 3 minutos por defecto)"""
+        if self.is_running:
+            logger.warning("⚠️ El monitoreo ya está ejecutándose")
+            return
+        
+        logger.info("🚀 Iniciando monitoreo continuo del mercado...")
+        logger.info(f"⏱️ Intervalo de actualización: {update_interval_seconds} segundos")
+        logger.info(f"📊 Monitoreando {len(self.all_symbols)} símbolos en {len(self.active_timeframes)} timeframes")
+        
+        self.is_running = True
+        
+        # Inicializar exchange si no está conectado
+        if not self.exchange:
+            if not self.initialize_exchange():
+                logger.error("❌ No se pudo conectar al exchange")
+                return
+        
+        # Thread principal de monitoreo
+        monitoring_thread = threading.Thread(
+            target=self._continuous_scan_loop,
+            args=(update_interval_seconds,),
+            daemon=True
+        )
+        monitoring_thread.start()
+        
+        # Thread para procesar resultados
+        results_thread = threading.Thread(
+            target=self._process_results_loop,
+            daemon=True
+        )
+        results_thread.start()
+        
+        logger.info("✅ Monitoreo continuo iniciado exitosamente")
+        
+        try:
+            # Mantener el programa ejecutándose
+            while self.is_running:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("⚠️ Deteniendo monitoreo por solicitud del usuario...")
+            self.stop_monitoring()
+    
+    def stop_monitoring(self):
+        """Detener el monitoreo continuo"""
+        self.is_running = False
+        logger.info("🛑 Monitoreo continuo detenido")
+    
+    def _continuous_scan_loop(self, interval_seconds: int):
+        """Loop principal de escaneo continuo"""
+        while self.is_running:
+            try:
+                start_time = time.time()
+                logger.info("🔍 Iniciando ciclo de escaneo...")
+                
+                # Escanear todos los símbolos en paralelo
+                self._parallel_symbol_scan()
+                
+                # Calcular tiempo transcurrido
+                elapsed_time = time.time() - start_time
+                logger.info(f"✅ Ciclo completado en {elapsed_time:.2f} segundos")
+                
+                # Esperar hasta el próximo ciclo
+                remaining_time = max(0, interval_seconds - elapsed_time)
+                if remaining_time > 0:
+                    logger.info(f"⏰ Esperando {remaining_time:.0f}s hasta el próximo ciclo...")
+                    time.sleep(remaining_time)
+                else:
+                    logger.warning("⚠️ El escaneo tomó más tiempo del esperado")
+                    time.sleep(10)  # Pausa mínima
+                    
+            except Exception as e:
+                logger.error(f"❌ Error en loop de monitoreo: {e}")
+                time.sleep(30)  # Pausa de recuperación
+    
+    def _parallel_symbol_scan(self):
+        """Escanear múltiples símbolos en paralelo para optimizar rendimiento"""
+        symbols_to_scan = self.all_symbols.copy()
+        
+        # Priorizar símbolos entrenados
+        trained_first = [s for s in symbols_to_scan if s in self.trained_symbols]
+        additional_symbols = [s for s in symbols_to_scan if s not in self.trained_symbols]
+        
+        # Organizar por prioridad
+        priority_symbols = trained_first + additional_symbols
+        
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Crear tareas para cada combinación symbol-timeframe
+            futures = {}
+            
+            for symbol in priority_symbols[:40]:  # Limitar a 40 símbolos para evitar límites de API
+                for timeframe in self.active_timeframes:
+                    future = executor.submit(self._scan_symbol_timeframe, symbol, timeframe)
+                    futures[future] = (symbol, timeframe)
+            
+            # Procesar resultados conforme van completándose
+            for future in as_completed(futures):
+                symbol, timeframe = futures[future]
+                try:
+                    result = future.result(timeout=30)  # Timeout de 30 segundos
+                    if result:
+                        self.results_queue.put(result)
+                except Exception as e:
+                    logger.error(f"❌ Error escaneando {symbol} {timeframe}: {e}")
+    
+    def _scan_symbol_timeframe(self, symbol: str, timeframe: str) -> Optional[Dict]:
+        """Escanear un símbolo específico en un timeframe específico"""
+        try:
+            # Verificar cache de precios primero
+            cached_price = self.get_cached_price(symbol)
+            if cached_price and timeframe == '5m':  # Usar cache solo para timeframe principal
+                logger.debug(f"💾 Usando precio en cache para {symbol}")
+                price_data = cached_price
+            else:
+                # Obtener datos de mercado
+                market_data = self.get_market_data(symbol, timeframe, limit=100)
+                if market_data is None:
+                    return None
+                
+                # Calcular precios de referencia
+                price_data = self.get_optimal_price_reference(symbol, market_data)
+                
+                # Actualizar cache
+                self.update_price_cache(symbol, price_data)
+            
+            # Generar señales solo si tenemos datos válidos
+            signals = self.generate_signals_for_symbol(symbol, timeframe)
+            
+            if signals:
+                result = {
+                    'symbol': symbol,
+                    'timeframe': timeframe,
+                    'signals': signals,
+                    'price_data': price_data,
+                    'scan_timestamp': datetime.now().isoformat(),
+                    'is_trained_symbol': symbol in self.trained_symbols
+                }
+                
+                return result
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Error en _scan_symbol_timeframe {symbol} {timeframe}: {e}")
+            return None
+    
+    def _process_results_loop(self):
+        """Loop para procesar resultados de escaneo y enviar al dashboard"""
+        while self.is_running:
+            try:
+                # Obtener resultado de la cola (con timeout)
+                result = self.results_queue.get(timeout=1)
+                
+                # Procesar resultado
+                self._process_scan_result(result)
+                
+                # Marcar tarea como completada
+                self.results_queue.task_done()
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"❌ Error procesando resultados: {e}")
+    
+    def _process_scan_result(self, result: Dict):
+        """Procesar un resultado individual de escaneo"""
+        try:
+            symbol = result['symbol']
+            timeframe = result['timeframe']
+            signals = result['signals']
+            price_data = result['price_data']
+            
+            if signals:
+                # Agrupar señales por categoría
+                categorized_signals = self._categorize_signals(signals)
+                
+                # Log de señales detectadas
+                for category, category_signals in categorized_signals.items():
+                    if category_signals:
+                        logger.info(f"🚨 {symbol} {timeframe} - {category.upper()}: {len(category_signals)} señales")
+                
+                # Actualizar precio en dashboard
+                update_price(symbol, price_data['binance_price'])
+                
+                # Enviar señales categorizadas al dashboard
+                self._send_categorized_signals_to_dashboard(symbol, categorized_signals, price_data)
+            
+        except Exception as e:
+            logger.error(f"❌ Error procesando resultado: {e}")
+    
+    def _categorize_signals(self, signals: List[Dict]) -> Dict[str, List[Dict]]:
+        """Categorizar señales por tipo: momentum, rebotes, tendencias"""
+        categorized = {
+            'momentum': [],
+            'rebound': [],
+            'trend': []
+        }
+        
+        for signal in signals:
+            signal_type = signal.get('type', '')
+            category = self.model_types.get(signal_type, {}).get('category', 'trend')
+            categorized[category].append(signal)
+        
+        return categorized
+    
+    def _send_categorized_signals_to_dashboard(self, symbol: str, categorized_signals: Dict, price_data: Dict):
+        """Enviar señales categorizadas al dashboard web"""
+        try:
+            # Preparar datos para el dashboard
+            dashboard_data = {
+                'symbol': symbol,
+                'price_data': price_data,
+                'signals_by_category': categorized_signals,
+                'timestamp': datetime.now().isoformat(),
+                'total_signals': sum(len(signals) for signals in categorized_signals.values())
+            }
+            
+            # Enviar cada señal individual para tracking
+            for category, signals in categorized_signals.items():
+                for signal in signals:
+                    try:
+                        # Track individual signal
+                        signal_id = track_signal(symbol, signal, price_data['binance_price'])
+                        logger.info(f"📊 Dashboard actualizado: {symbol} - {category} signal #{signal_id}")
+                    except Exception as e:
+                        logger.error(f"❌ Error enviando señal al dashboard: {e}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error enviando datos al dashboard: {e}")
+    
+    def run_signal_scan_new(self, symbols: Optional[List[str]] = None, timeframes: Optional[List[str]] = None) -> Dict:
+        """Ejecutar un escaneo completo de señales (compatibilidad con versión anterior)"""
+        if symbols is None:
+            symbols = self.trained_symbols[:10]  # Limitar a primeros 10 símbolos entrenados
+        if timeframes is None:
+            timeframes = ['5m', '1h']  # Timeframes principales
+        
+        # Type checkers - ensuring symbols and timeframes are not None
+        assert symbols is not None
+        assert timeframes is not None
+        
+        logger.info(f"🚀 Iniciando escaneo de señales para {len(symbols)} símbolos x {len(timeframes)} timeframes")
+        
+        all_signals = []
+        scan_stats = {
+            'total_symbols': len(symbols),
+            'total_timeframes': len(timeframes),
+            'signals_generated': 0,
+            'errors': 0,
+            'start_time': time.time()
+        }
+        
+        for symbol in symbols:
+            for timeframe in timeframes:
+                try:
+                    signals = self.generate_signals_for_symbol(symbol, timeframe)
+                    all_signals.extend(signals)
+                    scan_stats['signals_generated'] += len(signals)
+                    
+                    # Rate limiting
+                    time.sleep(0.5)
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error escaneando {symbol} {timeframe}: {e}")
+                    scan_stats['errors'] += 1
+                    continue
+        
+        scan_stats['total_time'] = time.time() - scan_stats['start_time']
+        scan_stats['signals'] = all_signals
+        
+        logger.info(f"✅ Escaneo completado: {scan_stats['signals_generated']} señales generadas")
+        return scan_stats
     
     def get_market_data(self, symbol: str, timeframe: str, limit: int = 200) -> Optional[pd.DataFrame]:
         """Get recent market data for analysis"""
@@ -594,53 +1050,68 @@ class NvBot3SignalGenerator:
                 time.sleep(60)  # Wait 1 minute before retry
 
 def main():
-    """Main function for running the signal generator"""
+    """Función principal mejorada para ejecutar el scanner en tiempo real"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='NvBot3 Signal Generator')
-    parser.add_argument('--mode', choices=['scan', 'monitor'], default='scan',
-                       help='Run mode: single scan or continuous monitoring')
-    parser.add_argument('--symbol', type=str, help='Specific symbol to analyze')
-    parser.add_argument('--timeframe', type=str, default='5m', help='Timeframe to use')
-    parser.add_argument('--interval', type=int, default=5, 
-                       help='Monitoring interval in minutes')
+    parser = argparse.ArgumentParser(description='NvBot3 Real-Time Market Scanner')
+    parser.add_argument('--mode', choices=['scan', 'monitor'], default='monitor',
+                       help='Modo: escaneo único o monitoreo continuo (por defecto: monitor)')
+    parser.add_argument('--symbol', type=str, help='Símbolo específico para analizar')
+    parser.add_argument('--timeframe', type=str, default='5m', help='Timeframe a usar')
+    parser.add_argument('--interval', type=int, default=180, 
+                       help='Intervalo de monitoreo en segundos (por defecto: 180)')
+    parser.add_argument('--max-symbols', type=int, default=40,
+                       help='Máximo número de símbolos a escanear simultáneamente')
     
     args = parser.parse_args()
     
-    # Initialize signal generator
-    generator = NvBot3SignalGenerator()
+    # Inicializar scanner en tiempo real
+    scanner = NvBot3RealTimeScanner()
     
-    # Initialize exchange connection
-    if not generator.initialize_exchange():
-        logger.error("❌ Could not initialize exchange connection")
+    # Configurar límite de símbolos
+    if args.max_symbols:
+        scanner.all_symbols = scanner.all_symbols[:args.max_symbols]
+    
+    # Inicializar conexión al exchange
+    if not scanner.initialize_exchange():
+        logger.error("❌ No se pudo conectar al exchange")
         return 1
     
     try:
         if args.mode == 'scan':
+            logger.info("🔍 Ejecutando escaneo único...")
             if args.symbol:
-                # Analyze single symbol
-                signals = generator.generate_signals_for_symbol(args.symbol, args.timeframe)
-                logger.info(f"📊 Generated {len(signals)} signals for {args.symbol}")
+                # Analizar símbolo específico
+                signals = scanner.generate_signals_for_symbol(args.symbol, args.timeframe)
+                logger.info(f"📊 Generadas {len(signals)} señales para {args.symbol}")
                 for signal in signals:
                     print(f"🚨 {signal['symbol']} {signal['type']}: {signal['confidence']:.3f}")
             else:
-                # Full scan
-                results = generator.run_signal_scan()
-                logger.info(f"📈 Scan completed: {results['signals_generated']} total signals")
+                # Escaneo completo una vez
+                results = scanner.run_signal_scan_new()
+                logger.info(f"📈 Escaneo completado: {results['signals_generated']} señales totales")
         
         elif args.mode == 'monitor':
-            # Continuous monitoring
-            generator.run_continuous_monitoring(args.interval)
+            # Monitoreo continuo (modo principal)
+            logger.info("🚀 Iniciando monitoreo continuo...")
+            logger.info("💡 Presiona Ctrl+C para detener")
+            scanner.start_continuous_monitoring(args.interval)
         
         return 0
         
     except Exception as e:
-        logger.error(f"💥 Critical error: {e}")
+        logger.error(f"💥 Error crítico: {e}")
         return 1
+    finally:
+        if scanner.is_running:
+            scanner.stop_monitoring()
 
 if __name__ == "__main__":
-    print("🤖 === NVBOT3 SIGNAL GENERATOR ===")
-    print("🎯 Real-time signal detection with dashboard integration")
-    print("="*60)
+    print("🤖 === NVBOT3 REAL-TIME MARKET SCANNER ===")
+    print("🎯 Monitoreo continuo del mercado con detección automática")
+    print("📊 Escaneo de 30+ monedas entrenadas + 30 adicionales")
+    print("⏱️ Múltiples timeframes: 3m, 5m, 15m, 1h, 4h")
+    print("🌐 Integración en tiempo real con dashboard web")
+    print("="*70)
     
     exit(main())

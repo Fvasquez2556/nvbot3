@@ -1,0 +1,146 @@
+/* Tema por defecto (dark) - Variables CSS para personalización */
+:root {
+    /* Colores de tema oscuro */
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #2d2d2d;
+    --bg-tertiary: #3a3a3a;
+    --text-primary: #ffffff;
+    --text-secondary: #b0b0b0;
+    --text-muted: #6c757d;
+    
+    /* Colores específicos de la aplicación */
+    --primary-color: #007bff;
+    --secondary-color: #6c757d;
+    --success-color: #28a745;
+    --danger-color: #dc3545;
+    --warning-color: #ffc107;
+    --info-color: #17a2b8;
+    
+    /* Bordes y sombras */
+    --border-color: #404040;
+    --shadow-color: rgba(0, 0, 0, 0.3);
+    --hover-bg: #404040;
+    --card-bg: #2d2d2d;
+    --bg-light: #404040;
+}
+
+/* Tema claro alternativo */
+[data-theme="light"] {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --bg-tertiary: #e9ecef;
+    --text-primary: #212529;
+    --text-secondary: #495057;
+    --text-muted: #6c757d;
+    
+    --border-color: #dee2e6;
+    --shadow-color: rgba(0, 0, 0, 0.1);
+    --hover-bg: #f8f9fa;
+    --card-bg: #ffffff;
+    --bg-light: #f8f9fa;
+}
+
+/* Aplicar tema a body */
+body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Botón de cambio de tema */
+.theme-toggle {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 10px var(--shadow-color);
+}
+
+.theme-toggle:hover {
+    transform: scale(1.1);
+    box-shadow: 0 4px 15px var(--shadow-color);
+}
+
+/* Mejoras de accesibilidad */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* Modo de alto contraste */
+@media (prefers-contrast: high) {
+    :root {
+        --border-color: #000000;
+        --text-primary: #ffffff;
+        --bg-primary: #000000;
+        --card-bg: #1a1a1a;
+    }
+    
+    [data-theme="light"] {
+        --border-color: #000000;
+        --text-primary: #000000;
+        --bg-primary: #ffffff;
+        --card-bg: #ffffff;
+    }
+}
+
+/* Responsive adicional para móviles */
+@media (max-width: 576px) {
+    .theme-toggle {
+        top: 10px;
+        right: 10px;
+        width: 40px;
+        height: 40px;
+    }
+    
+    .container-fluid {
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+    
+    .metric-card {
+        margin-bottom: 1rem;
+    }
+    
+    .signal-item {
+        padding: 0.75rem;
+    }
+}
+
+/* Animaciones suaves para transiciones */
+.fade-in {
+    animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Mejoras para impresión */
+@media print {
+    .theme-toggle {
+        display: none !important;
+    }
+    
+    .navbar {
+        background: white !important;
+        color: black !important;
+    }
+    
+    .section-card {
+        border: 1px solid #000 !important;
+        break-inside: avoid;
+    }
+}
