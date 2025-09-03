@@ -1,0 +1,53 @@
+================================================================================
+NvBot3 - COMPREHENSIVE PRICE DIAGNOSTIC REPORT
+================================================================================
+Generated: 2025-09-03 12:48:44
+Total symbols configured: 76
+
+🔍 CURRENT BINANCE PRICES STATUS:
+✅ Successfully fetched: 76 symbols
+
+📊 DASHBOARD DATA SOURCES:
+✅ Signal Tracker Db
+✅ Local Csv Files
+✅ Binance Api Direct
+✅ Websocket Feed
+
+🎯 DASHBOARD ACCURACY ANALYSIS:
+Symbols analyzed: 4
+Critical errors: 1
+Warnings: 2
+Overall accuracy: 25.0%
+
+🚨 CRITICAL PRICE ERRORS:
+   ADAUSDT: Dashboard=2012.254771, Real=0.8364
+
+🔬 ADAUSDT PRECISION ERROR ANALYSIS:
+Multiplication factor: 2405.9x
+Possible causes:
+Suggested fixes:
+
+📁 LOCAL DATA FILES STATUS:
+Total expected files: 380
+Files found: 150
+Files missing: 230
+Completion rate: 39.5%
+
+⚠️  SYMBOLS WITH MOST ISSUES:
+   BTCUSDT: 5 issues
+   ETHUSDT: 5 issues
+   BNBUSDT: 5 issues
+   ADAUSDT: 5 issues
+   SOLUSDT: 5 issues
+   XRPUSDT: 5 issues
+   DOTUSDT: 5 issues
+   LINKUSDT: 5 issues
+   MATICUSDT: 5 issues
+   AVAXUSDT: 5 issues
+
+🔧 RECOMMENDED ACTIONS:
+1. Run: python scripts/fix_price_feed.py
+2. Restart dashboard: python scripts/start_dashboard.py
+3. Verify prices at: http://localhost:5000
+
+================================================================================
